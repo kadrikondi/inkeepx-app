@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.hardware.Sensor;
 import android.hardware.SensorManager;
 import android.net.ConnectivityManager;
@@ -12,10 +13,10 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.webkit.CookieManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
-import android.webkit.CookieManager;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
@@ -34,8 +35,12 @@ public class MainActivity extends Activity {
     private Button retryButton;
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
-    private static final String APP_URL = "https://www.inkeepx.com/login";
-    private static final String APP_ROOT = "https://www.inkeepx.com/";
+    private SharedPreferences prefs;
+
+    private static final String LOGIN_URL     = "https://www.inkeepx.com/login";
+    private static final String PREFS_NAME    = "inkeepx_session";
+    private static final String KEY_LAST_URL  = "last_url";
+    private static final String KEY_LOGGED_IN = "logged_in";
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -43,40 +48,23 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        spinner = findViewById(R.id.spinner);
+        prefs        = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        spinner      = findViewById(R.id.spinner);
         swipeRefresh = findViewById(R.id.swipeRefresh);
-        webView = findViewById(R.id.webView);
-        offlineView = findViewById(R.id.offlineView);
-        retryButton = findViewById(R.id.retryButton);
+        webView      = findViewById(R.id.webView);
+        offlineView  = findViewById(R.id.offlineView);
+        retryButton  = findViewById(R.id.retryButton);
 
-        // Persist cookies & localStorage across app restarts — keeps users logged in
-        CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        // ── Cookie persistence (must be before any page load) ─────────────────
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
 
-        retryButton.setOnClickListener(v -> {
-            if (isOnline()) {
-                showWeb();
-                webView.reload();
-            } else {
-                // subtle shake feedback — just re-show offline so user knows we checked
-                offlineView.animate().alpha(0.5f).setDuration(100)
-                    .withEndAction(() -> offlineView.animate().alpha(1f).setDuration(100).start())
-                    .start();
-            }
-        });
-
-        // Only enable pull-to-refresh when the PAGE itself is scrolled to top
-        // This won't be fooled by internal scrollable elements like product lists
-        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
-            swipeRefresh.setEnabled(scrollY == 0);
-        });
-
-        swipeRefresh.setColorSchemeColors(0xFFE8000D);
-        swipeRefresh.setOnRefreshListener(() -> webView.reload());
-
+        // ── WebView settings ──────────────────────────────────────────────────
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setBuiltInZoomControls(false);
@@ -85,17 +73,20 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
 
-        // Flush cookies to disk whenever a page finishes — ensures session survives app kill
+        // ── Pull-to-refresh guard ─────────────────────────────────────────────
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldX, oldY) ->
+            swipeRefresh.setEnabled(scrollY == 0));
+        swipeRefresh.setColorSchemeColors(0xFFE8000D);
+        swipeRefresh.setOnRefreshListener(() -> webView.reload());
 
+        // ── WebViewClient ─────────────────────────────────────────────────────
         webView.setWebViewClient(new WebViewClient() {
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                if (url.contains("inkeepx.com")) {
-                    return false;
-                }
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                startActivity(intent);
+                if (url.contains("inkeepx.com")) return false;
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
                 return true;
             }
 
@@ -103,53 +94,79 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 spinner.setVisibility(View.GONE);
                 swipeRefresh.setRefreshing(false);
-                // Flush cookies to disk so session survives app kill
+
+                // Write cookies to disk immediately
                 CookieManager.getInstance().flush();
+
+                // Track login state by URL:
+                // Anywhere outside /login = user is logged in
+                boolean onLoginPage = url != null && url.contains("/login");
+                prefs.edit()
+                    .putBoolean(KEY_LOGGED_IN, !onLoginPage)
+                    .putString(KEY_LAST_URL, onLoginPage ? LOGIN_URL : url)
+                    .apply();
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
-                if (request.isForMainFrame()) {
-                    showOffline();
-                }
+                if (request.isForMainFrame()) showOffline();
             }
         });
 
+        // ── Progress spinner ──────────────────────────────────────────────────
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onProgressChanged(WebView view, int newProgress) {
-                if (newProgress < 100) {
-                    spinner.setVisibility(View.VISIBLE);
-                } else {
-                    spinner.setVisibility(View.GONE);
-                    swipeRefresh.setRefreshing(false);
-                }
+                spinner.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
+                if (newProgress == 100) swipeRefresh.setRefreshing(false);
             }
         });
 
-        // Shake to refresh — shows a confirm dialog before reloading
+        // ── Shake to reload ───────────────────────────────────────────────────
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        shakeDetector = new ShakeDetector(() -> {
-            runOnUiThread(() -> {
-                new AlertDialog.Builder(this)
-                    .setMessage("Reload page?")
-                    .setPositiveButton("Yes", (dialog, which) -> webView.reload())
-                    .setNegativeButton("No", (dialog, which) -> dialog.dismiss())
-                    .show();
-            });
+        shakeDetector = new ShakeDetector(() -> runOnUiThread(() ->
+            new AlertDialog.Builder(this)
+                .setMessage("Reload page?")
+                .setPositiveButton("Yes", (d, w) -> webView.reload())
+                .setNegativeButton("No",  (d, w) -> d.dismiss())
+                .show()));
+
+        // ── Retry button ──────────────────────────────────────────────────────
+        retryButton.setOnClickListener(v -> {
+            if (isOnline()) {
+                showWeb();
+                webView.reload();
+            } else {
+                offlineView.animate().alpha(0.5f).setDuration(100)
+                    .withEndAction(() ->
+                        offlineView.animate().alpha(1f).setDuration(100).start())
+                    .start();
+            }
         });
 
-        // Load root — if user is already logged in, server will redirect to dashboard.
-        // Only lands on /login if session has expired or user never logged in.
-        webView.loadUrl(APP_ROOT);
+        // ── Decide what URL to load ───────────────────────────────────────────
         if (!isOnline()) {
             showOffline();
+            return;
+        }
+
+        boolean wasLoggedIn = prefs.getBoolean(KEY_LOGGED_IN, false);
+        String  lastUrl     = prefs.getString(KEY_LAST_URL, LOGIN_URL);
+
+        if (wasLoggedIn && lastUrl != null && !lastUrl.contains("/login")) {
+            // Resume the last page — server will bounce to /login if the
+            // session cookie has expired on its end
+            webView.loadUrl(lastUrl);
+        } else {
+            // First launch or explicit logout — show login
+            webView.loadUrl(LOGIN_URL);
         }
     }
 
     private boolean isOnline() {
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        ConnectivityManager cm =
+            (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo net = cm.getActiveNetworkInfo();
         return net != null && net.isConnected();
     }
@@ -180,6 +197,7 @@ public class MainActivity extends Activity {
         super.onPause();
         webView.onPause();
         sensorManager.unregisterListener(shakeDetector);
+        CookieManager.getInstance().flush(); // extra flush when backgrounded
     }
 
     @Override
