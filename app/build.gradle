@@ -10,8 +10,8 @@ android {
         applicationId "com.inkeepx.app"
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
     }
 
     buildTypes {
@@ -28,5 +28,5 @@ android {
 }
 
 dependencies {
-    // No third-party dependencies — pure Android WebView, no ads, no SDKs
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
 }

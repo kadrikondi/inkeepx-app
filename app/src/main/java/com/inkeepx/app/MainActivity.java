@@ -6,18 +6,20 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
-import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
 import android.widget.ProgressBar;
 import android.view.View;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends Activity {
 
     private WebView webView;
-    private ProgressBar progressBar;
+    private ProgressBar spinner;
+    private SwipeRefreshLayout swipeRefresh;
     private static final String APP_URL = "https://www.inkeepx.com/login";
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -26,8 +28,13 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        progressBar = findViewById(R.id.progressBar);
+        spinner = findViewById(R.id.spinner);
+        swipeRefresh = findViewById(R.id.swipeRefresh);
         webView = findViewById(R.id.webView);
+
+        // Pull-to-refresh color matches InkeepX red
+        swipeRefresh.setColorSchemeColors(0xFFE8000D);
+        swipeRefresh.setOnRefreshListener(() -> webView.reload());
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -39,13 +46,11 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " InkeepxApp/1.0");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
-                // Keep inkeepx.com links inside the app; open external links in browser
                 if (url.contains("inkeepx.com")) {
                     return false;
                 }
@@ -56,7 +61,8 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                progressBar.setVisibility(View.GONE);
+                spinner.setVisibility(View.GONE);
+                swipeRefresh.setRefreshing(false);
             }
         });
 
@@ -64,10 +70,10 @@ public class MainActivity extends Activity {
             @Override
             public void onProgressChanged(WebView view, int newProgress) {
                 if (newProgress < 100) {
-                    progressBar.setVisibility(View.VISIBLE);
-                    progressBar.setProgress(newProgress);
+                    spinner.setVisibility(View.VISIBLE);
                 } else {
-                    progressBar.setVisibility(View.GONE);
+                    spinner.setVisibility(View.GONE);
+                    swipeRefresh.setRefreshing(false);
                 }
             }
         });
