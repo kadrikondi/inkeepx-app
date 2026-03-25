@@ -1,8 +1,8 @@
 package com.inkeepx.app;
-
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 
 public class ShakeDetector implements SensorEventListener {
 
