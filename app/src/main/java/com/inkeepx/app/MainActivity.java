@@ -2,7 +2,11 @@ package com.inkeepx.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
@@ -20,6 +24,8 @@ public class MainActivity extends Activity {
     private WebView webView;
     private ProgressBar spinner;
     private SwipeRefreshLayout swipeRefresh;
+    private SensorManager sensorManager;
+    private ShakeDetector shakeDetector;
     private static final String APP_URL = "https://www.inkeepx.com/login";
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -32,7 +38,12 @@ public class MainActivity extends Activity {
         swipeRefresh = findViewById(R.id.swipeRefresh);
         webView = findViewById(R.id.webView);
 
-        // Pull-to-refresh color matches InkeepX red
+        // Only enable pull-to-refresh when the PAGE itself is scrolled to top
+        // This won't be fooled by internal scrollable elements like product lists
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            swipeRefresh.setEnabled(scrollY == 0);
+        });
+
         swipeRefresh.setColorSchemeColors(0xFFE8000D);
         swipeRefresh.setOnRefreshListener(() -> webView.reload());
 
@@ -78,7 +89,35 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Shake to refresh — shows a confirm dialog before reloading
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        shakeDetector = new ShakeDetector(() -> {
+            runOnUiThread(() -> {
+                new AlertDialog.Builder(this)
+                    .setMessage("Reload page?")
+                    .setPositiveButton("Yes", (dialog, which) -> webView.reload())
+                    .setNegativeButton("No", (dialog, which) -> dialog.dismiss())
+                    .show();
+            });
+        });
+
         webView.loadUrl(APP_URL);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        webView.onResume();
+        sensorManager.registerListener(shakeDetector,
+            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+            SensorManager.SENSOR_DELAY_UI);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        webView.onPause();
+        sensorManager.unregisterListener(shakeDetector);
     }
 
     @Override
@@ -88,17 +127,5 @@ public class MainActivity extends Activity {
             return true;
         }
         return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        webView.onResume();
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        webView.onPause();
     }
 }
