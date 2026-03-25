@@ -21,21 +21,17 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Download valid Gradle wrapper jar
+      - name: Install Gradle 8.4 directly
         run: |
           curl -sL "https://services.gradle.org/distributions/gradle-8.4-bin.zip" -o /tmp/gradle.zip
-          unzip -o /tmp/gradle.zip -d /tmp/gradle-dist
-          cp /tmp/gradle-dist/gradle-8.4/lib/plugins/gradle-wrapper-8.4.jar gradle/wrapper/gradle-wrapper.jar
-          echo "Wrapper jar size: $(ls -lh gradle/wrapper/gradle-wrapper.jar | awk '{print $5}')"
+          unzip -q /tmp/gradle.zip -d /opt/gradle
+          echo "/opt/gradle/gradle-8.4/bin" >> $GITHUB_PATH
 
-      - name: Make gradlew executable
-        run: chmod +x gradlew
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
