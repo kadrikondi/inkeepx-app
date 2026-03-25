@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,6 +23,16 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+
+      - name: Download valid Gradle wrapper jar
+        run: |
+          echo "Downloading Gradle 8.4 to extract wrapper jar..."
+          curl -sL "https://services.gradle.org/distributions/gradle-8.4-bin.zip" -o /tmp/gradle.zip
+          unzip -o /tmp/gradle.zip -d /tmp/gradle-dist
+          WRAPPER_JAR=$(find /tmp/gradle-dist -name "gradle-wrapper.jar" | head -1)
+          echo "Found: $WRAPPER_JAR"
+          cp "$WRAPPER_JAR" gradle/wrapper/gradle-wrapper.jar
+          ls -lh gradle/wrapper/gradle-wrapper.jar
 
       - name: Make gradlew executable
         run: chmod +x gradlew
