@@ -26,13 +26,10 @@ jobs:
 
       - name: Download valid Gradle wrapper jar
         run: |
-          echo "Downloading Gradle 8.4 to extract wrapper jar..."
           curl -sL "https://services.gradle.org/distributions/gradle-8.4-bin.zip" -o /tmp/gradle.zip
           unzip -o /tmp/gradle.zip -d /tmp/gradle-dist
-          WRAPPER_JAR=$(find /tmp/gradle-dist -name "gradle-wrapper.jar" | head -1)
-          echo "Found: $WRAPPER_JAR"
-          cp "$WRAPPER_JAR" gradle/wrapper/gradle-wrapper.jar
-          ls -lh gradle/wrapper/gradle-wrapper.jar
+          cp /tmp/gradle-dist/gradle-8.4/lib/plugins/gradle-wrapper-8.4.jar gradle/wrapper/gradle-wrapper.jar
+          echo "Wrapper jar size: $(ls -lh gradle/wrapper/gradle-wrapper.jar | awk '{print $5}')"
 
       - name: Make gradlew executable
         run: chmod +x gradlew
