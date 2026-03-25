@@ -7,14 +7,19 @@ import android.content.Context;
 import android.content.Intent;
 import android.hardware.Sensor;
 import android.hardware.SensorManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
+import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.view.View;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -24,6 +29,8 @@ public class MainActivity extends Activity {
     private WebView webView;
     private ProgressBar spinner;
     private SwipeRefreshLayout swipeRefresh;
+    private LinearLayout offlineView;
+    private Button retryButton;
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
     private static final String APP_URL = "https://www.inkeepx.com/login";
@@ -37,6 +44,20 @@ public class MainActivity extends Activity {
         spinner = findViewById(R.id.spinner);
         swipeRefresh = findViewById(R.id.swipeRefresh);
         webView = findViewById(R.id.webView);
+        offlineView = findViewById(R.id.offlineView);
+        retryButton = findViewById(R.id.retryButton);
+
+        retryButton.setOnClickListener(v -> {
+            if (isOnline()) {
+                showWeb();
+                webView.reload();
+            } else {
+                // subtle shake feedback — just re-show offline so user knows we checked
+                offlineView.animate().alpha(0.5f).setDuration(100)
+                    .withEndAction(() -> offlineView.animate().alpha(1f).setDuration(100).start())
+                    .start();
+            }
+        });
 
         // Only enable pull-to-refresh when the PAGE itself is scrolled to top
         // This won't be fooled by internal scrollable elements like product lists
@@ -75,6 +96,14 @@ public class MainActivity extends Activity {
                 spinner.setVisibility(View.GONE);
                 swipeRefresh.setRefreshing(false);
             }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request,
+                                        WebResourceError error) {
+                if (request.isForMainFrame()) {
+                    showOffline();
+                }
+            }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -102,6 +131,27 @@ public class MainActivity extends Activity {
         });
 
         webView.loadUrl(APP_URL);
+        if (!isOnline()) {
+            showOffline();
+        }
+    }
+
+    private boolean isOnline() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo net = cm.getActiveNetworkInfo();
+        return net != null && net.isConnected();
+    }
+
+    private void showOffline() {
+        spinner.setVisibility(View.GONE);
+        swipeRefresh.setRefreshing(false);
+        webView.setVisibility(View.GONE);
+        offlineView.setVisibility(View.VISIBLE);
+    }
+
+    private void showWeb() {
+        offlineView.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE);
     }
 
     @Override
