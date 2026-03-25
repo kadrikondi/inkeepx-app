@@ -15,6 +15,7 @@ import android.view.KeyEvent;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
+import android.webkit.CookieManager;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
@@ -34,6 +35,7 @@ public class MainActivity extends Activity {
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
     private static final String APP_URL = "https://www.inkeepx.com/login";
+    private static final String APP_ROOT = "https://www.inkeepx.com/";
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -46,6 +48,10 @@ public class MainActivity extends Activity {
         webView = findViewById(R.id.webView);
         offlineView = findViewById(R.id.offlineView);
         retryButton = findViewById(R.id.retryButton);
+
+        // Persist cookies & localStorage across app restarts — keeps users logged in
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
         retryButton.setOnClickListener(v -> {
             if (isOnline()) {
@@ -79,6 +85,8 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
 
+        // Flush cookies to disk whenever a page finishes — ensures session survives app kill
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -95,6 +103,8 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 spinner.setVisibility(View.GONE);
                 swipeRefresh.setRefreshing(false);
+                // Flush cookies to disk so session survives app kill
+                CookieManager.getInstance().flush();
             }
 
             @Override
@@ -130,7 +140,9 @@ public class MainActivity extends Activity {
             });
         });
 
-        webView.loadUrl(APP_URL);
+        // Load root — if user is already logged in, server will redirect to dashboard.
+        // Only lands on /login if session has expired or user never logged in.
+        webView.loadUrl(APP_ROOT);
         if (!isOnline()) {
             showOffline();
         }
