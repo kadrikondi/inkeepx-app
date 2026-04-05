@@ -17,31 +17,29 @@ import android.os.Environment;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
+import android.util.Base64;
 import android.view.KeyEvent;
+import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.webkit.WebChromeClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
-import android.view.View;
 import androidx.core.content.FileProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import android.util.Base64;
 
 public class MainActivity extends Activity {
 
@@ -53,6 +51,11 @@ public class MainActivity extends Activity {
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
     private SharedPreferences prefs;
+
+    // File chooser callback — held so we can deliver the result from onActivityResult
+    private ValueCallback<Uri[]> fileChooserCallback;
+    private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final int CAMERA_PERMISSION_REQUEST = 1002;
 
     private static final String LOGIN_URL     = "https://www.inkeepx.com/login";
     private static final String PREFS_NAME    = "inkeepx_session";
@@ -82,6 +85,7 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+        settings.setAllowFileAccess(true);           // needed for file:// URIs from chooser
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setBuiltInZoomControls(false);
@@ -90,38 +94,35 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
 
+        // ── JS interfaces ─────────────────────────────────────────────────────
+        webView.addJavascriptInterface(new PrintBridge(), "AndroidPrint");
+        webView.addJavascriptInterface(new DownloadBridge(), "AndroidDownload");
+
         // ── Pull-to-refresh guard ─────────────────────────────────────────────
         webView.setOnScrollChangeListener((v, scrollX, scrollY, oldX, oldY) ->
             swipeRefresh.setEnabled(scrollY == 0));
         swipeRefresh.setColorSchemeColors(0xFFE8000D);
         swipeRefresh.setOnRefreshListener(() -> webView.reload());
 
-        // ── Download listener — handles CSV, PDF, and all file downloads ──────
-        // WebView silently drops download links without this.
-        webView.setDownloadListener(new DownloadListener() {
-            @Override
-            public void onDownloadStart(String url, String userAgent,
-                                        String contentDisposition, String mimeType,
-                                        long contentLength) {
-                if (url.startsWith("data:") || url.startsWith("blob:")) {
-                    // data: URIs (e.g. JS-generated CSV blobs) — download via JS injection
-                    handleBlobOrDataDownload(url, contentDisposition, mimeType);
-                } else {
-                    // Regular URL download — hand off to the system DownloadManager
-                    // so it benefits from auth cookies and shows in the notification bar
-                    handleUrlDownload(url, userAgent, contentDisposition, mimeType);
-                }
+        // ── Download listener ─────────────────────────────────────────────────
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            if (url.startsWith("data:") || url.startsWith("blob:")) {
+                handleBlobOrDataDownload(url, contentDisposition, mimeType);
+            } else {
+                handleUrlDownload(url, userAgent, contentDisposition, mimeType);
             }
         });
 
-        // ── WebViewClient ─────────────────────────────────────────────────────
+        // ── WebViewClient (single, definitive instance) ───────────────────────
         webView.setWebViewClient(new WebViewClient() {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
                 if (url.contains("inkeepx.com")) return false;
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                } catch (ActivityNotFoundException ignored) {}
                 return true;
             }
 
@@ -131,11 +132,16 @@ public class MainActivity extends Activity {
                 swipeRefresh.setRefreshing(false);
                 CookieManager.getInstance().flush();
 
+                // Track login state
                 boolean onLoginPage = url != null && url.contains("/login");
                 prefs.edit()
                     .putBoolean(KEY_LOGGED_IN, !onLoginPage)
                     .putString(KEY_LAST_URL, onLoginPage ? LOGIN_URL : url)
                     .apply();
+
+                // Patch window.print() to route through Android PrintManager
+                view.evaluateJavascript(
+                    "window.print = function() { AndroidPrint.print(); };", null);
             }
 
             @Override
@@ -145,53 +151,47 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ── WebChromeClient — print is triggered here via window.print() ──────
+        // ── WebChromeClient — handles file upload chooser + progress ──────────
         webView.setWebChromeClient(new WebChromeClient() {
+
             @Override
             public void onProgressChanged(WebView view, int newProgress) {
                 spinner.setVisibility(newProgress < 100 ? View.VISIBLE : View.GONE);
                 if (newProgress == 100) swipeRefresh.setRefreshing(false);
             }
-        });
 
-        // Inject a JS interface so the page can call Android print directly
-        webView.addJavascriptInterface(new PrintBridge(), "AndroidPrint");
-        webView.addJavascriptInterface(new DownloadBridge(), "AndroidDownload");
-
-        // After every page load, patch window.print() to route through Android
-        webView.setWebViewClient(new WebViewClient() {
-
+            // This is the KEY method that makes <input type="file"> work in WebView.
+            // Without it, tapping any file/image upload button does absolutely nothing.
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (url.contains("inkeepx.com")) return false;
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            public boolean onShowFileChooser(WebView webView,
+                                             ValueCallback<Uri[]> filePathCallback,
+                                             FileChooserParams fileChooserParams) {
+                // Cancel any previous pending callback to avoid leaking it
+                if (fileChooserCallback != null) {
+                    fileChooserCallback.onReceiveValue(null);
+                }
+                fileChooserCallback = filePathCallback;
+
+                // Build an intent that lets the user pick from files OR camera
+                Intent fileIntent = fileChooserParams.createIntent();
+
+                // Also add a camera capture option for image fields
+                Intent cameraIntent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+
+                // Combine both into a chooser so user can pick source
+                Intent chooser = Intent.createChooser(fileIntent, "Select File");
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS,
+                    new Intent[]{ cameraIntent });
+
+                try {
+                    startActivityForResult(chooser, FILE_CHOOSER_REQUEST);
+                } catch (ActivityNotFoundException e) {
+                    fileChooserCallback = null;
+                    Toast.makeText(MainActivity.this,
+                        "No file manager found", Toast.LENGTH_SHORT).show();
+                    return false;
+                }
                 return true;
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                spinner.setVisibility(View.GONE);
-                swipeRefresh.setRefreshing(false);
-                CookieManager.getInstance().flush();
-
-                boolean onLoginPage = url != null && url.contains("/login");
-                prefs.edit()
-                    .putBoolean(KEY_LOGGED_IN, !onLoginPage)
-                    .putString(KEY_LAST_URL, onLoginPage ? LOGIN_URL : url)
-                    .apply();
-
-                // Override window.print() so it routes to Android PrintManager
-                view.evaluateJavascript(
-                    "window.print = function() { AndroidPrint.print(); };",
-                    null
-                );
-            }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest request,
-                                        WebResourceError error) {
-                if (request.isForMainFrame()) showOffline();
             }
         });
 
@@ -217,7 +217,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ── Decide what URL to load ───────────────────────────────────────────
+        // ── Initial URL ───────────────────────────────────────────────────────
         if (!isOnline()) {
             showOffline();
             return;
@@ -233,7 +233,35 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ── Print bridge — called from JS window.print() ─────────────────────────
+    // ── File chooser result ───────────────────────────────────────────────────
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == FILE_CHOOSER_REQUEST) {
+            if (fileChooserCallback == null) return;
+
+            Uri[] results = null;
+            if (resultCode == Activity.RESULT_OK) {
+                if (data != null) {
+                    String dataString = data.getDataString();
+                    if (dataString != null) {
+                        results = new Uri[]{ Uri.parse(dataString) };
+                    } else if (data.getClipData() != null) {
+                        // Multiple files selected
+                        int count = data.getClipData().getItemCount();
+                        results = new Uri[count];
+                        for (int i = 0; i < count; i++) {
+                            results[i] = data.getClipData().getItemAt(i).getUri();
+                        }
+                    }
+                }
+            }
+            // Deliver result (null = cancelled, which is also correct behaviour)
+            fileChooserCallback.onReceiveValue(results);
+            fileChooserCallback = null;
+        }
+    }
+
+    // ── Print bridge ──────────────────────────────────────────────────────────
     private class PrintBridge {
         @android.webkit.JavascriptInterface
         public void print() {
@@ -242,25 +270,25 @@ public class MainActivity extends Activity {
                     (PrintManager) getSystemService(Context.PRINT_SERVICE);
                 PrintDocumentAdapter adapter =
                     webView.createPrintDocumentAdapter("InkeepX Document");
-                PrintAttributes attrs = new PrintAttributes.Builder()
-                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                    .build();
-                printManager.print("InkeepX", adapter, attrs);
+                printManager.print("InkeepX", adapter,
+                    new PrintAttributes.Builder()
+                        .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                        .build());
             });
         }
     }
 
-    // ── Handle blob: / data: URI downloads (JS-generated files like CSV) ─────
+    // ── Blob / data: URI download ─────────────────────────────────────────────
     private void handleBlobOrDataDownload(String url, String contentDisposition,
                                           String mimeType) {
-        // Inject JS that reads the blob/data and passes base64 back to us
+        String safeUrl = url.replace("'", "\\'");
         String js =
             "(function() {" +
-            "  var url = '" + url.replace("'", "\\'") + "';" +
+            "  var url = '" + safeUrl + "';" +
             "  if (url.startsWith('data:')) {" +
             "    var base64 = url.split(',')[1];" +
-            "    var mime   = url.split(';')[0].split(':')[1];" +
-            "    AndroidDownload.receiveBase64(base64, mime, '');" +
+            "    var mime = url.split(';')[0].split(':')[1];" +
+            "    AndroidDownload.receiveBase64(base64, mime);" +
             "    return;" +
             "  }" +
             "  fetch(url)" +
@@ -268,61 +296,49 @@ public class MainActivity extends Activity {
             "    .then(blob => {" +
             "      var reader = new FileReader();" +
             "      reader.onloadend = function() {" +
-            "        var base64 = reader.result.split(',')[1];" +
-            "        AndroidDownload.receiveBase64(base64, blob.type, '');" +
+            "        var b64 = reader.result.split(',')[1];" +
+            "        AndroidDownload.receiveBase64(b64, blob.type);" +
             "      };" +
             "      reader.readAsDataURL(blob);" +
             "    });" +
             "})();";
-
         webView.evaluateJavascript(js, null);
     }
 
-    // ── Handle regular URL downloads via system DownloadManager ──────────────
+    // ── Regular URL download via DownloadManager ──────────────────────────────
     private void handleUrlDownload(String url, String userAgent,
                                    String contentDisposition, String mimeType) {
         android.app.DownloadManager.Request request =
             new android.app.DownloadManager.Request(Uri.parse(url));
-
         String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
         request.setTitle(fileName);
         request.setDescription("Downloading via InkeepX");
         request.setMimeType(mimeType);
-
-        // Pass auth cookies so the server accepts the download request
         String cookies = CookieManager.getInstance().getCookie(url);
-        request.addRequestHeader("Cookie", cookies);
+        if (cookies != null) request.addRequestHeader("Cookie", cookies);
         request.addRequestHeader("User-Agent", userAgent);
-
         request.setNotificationVisibility(
             android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationInExternalPublicDir(
-            Environment.DIRECTORY_DOWNLOADS, fileName);
-
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
         android.app.DownloadManager dm =
             (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
         dm.enqueue(request);
-
-        Toast.makeText(this,
-            "Downloading " + fileName + "…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Downloading " + fileName + "…", Toast.LENGTH_SHORT).show();
     }
 
-    // ── JS interface to receive base64 data from blob downloads ──────────────
+    // ── Download bridge (receives base64 from JS) ─────────────────────────────
     private class DownloadBridge {
         @android.webkit.JavascriptInterface
-        public void receiveBase64(String base64, String mimeType, String hint) {
+        public void receiveBase64(String base64, String mimeType) {
             runOnUiThread(() -> saveBase64File(base64, mimeType));
         }
     }
 
     private void saveBase64File(String base64, String mimeType) {
         try {
-            String ext = MimeTypeMap.getSingleton()
-                .getExtensionFromMimeType(mimeType);
+            String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType);
             if (ext == null) ext = "bin";
-
-            String fileName = "inkeepx_export_"
-                + System.currentTimeMillis() + "." + ext;
+            String fileName = "inkeepx_export_" + System.currentTimeMillis() + "." + ext;
 
             File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
             if (dir == null) dir = getCacheDir();
@@ -333,11 +349,8 @@ public class MainActivity extends Activity {
                 fos.write(data);
             }
 
-            // Open the file with the appropriate system app
             Uri fileUri = FileProvider.getUriForFile(
-                this,
-                getPackageName() + ".fileprovider",
-                file);
+                this, getPackageName() + ".fileprovider", file);
 
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setDataAndType(fileUri, mimeType);
@@ -346,16 +359,13 @@ public class MainActivity extends Activity {
             try {
                 startActivity(intent);
             } catch (ActivityNotFoundException e) {
-                // No app to open it — share sheet instead
                 Intent share = new Intent(Intent.ACTION_SEND);
                 share.setType(mimeType);
                 share.putExtra(Intent.EXTRA_STREAM, fileUri);
                 share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 startActivity(Intent.createChooser(share, "Open with"));
             }
-
             Toast.makeText(this, "Saved: " + fileName, Toast.LENGTH_SHORT).show();
-
         } catch (Exception e) {
             Toast.makeText(this, "Download failed: " + e.getMessage(),
                 Toast.LENGTH_LONG).show();
