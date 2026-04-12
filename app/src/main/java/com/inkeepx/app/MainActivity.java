@@ -328,14 +328,16 @@ public class MainActivity extends Activity {
             "  URL.createObjectURL = function(blob) {" +
             "    var u = origCreate(blob);" +
             "    try {" +
+            "      map[u] = {" +
+            "        blob: blob," +
+            "        b64: ''," +
+            "        mime: blob && blob.type ? blob.type : 'text/csv'" +
+            "      };" +
             "      var fr = new FileReader();" +
             "      fr.onloadend = function() {" +
             "        var d = String(fr.result || '');" +
             "        var i = d.indexOf(',');" +
-            "        map[u] = {" +
-            "          b64: i >= 0 ? d.substring(i + 1) : ''," +
-            "          mime: blob && blob.type ? blob.type : 'text/csv'" +
-            "        };" +
+            "        if (map[u]) map[u].b64 = i >= 0 ? d.substring(i + 1) : '';" +
             "      };" +
             "      fr.readAsDataURL(blob);" +
             "    } catch (e) {}" +
@@ -366,8 +368,14 @@ public class MainActivity extends Activity {
             "  function handleHref(href) {" +
             "    if (!href) return false;" +
             "    var u = toAbsUrl(href);" +
-            "    if (u.indexOf('blob:') === 0 && map[u] && map[u].b64) {" +
-            "      AndroidDownload.receiveBase64(map[u].b64, map[u].mime || 'text/csv');" +
+            "    if (u.indexOf('blob:') === 0 && map[u]) {" +
+            "      if (map[u].b64) {" +
+            "        AndroidDownload.receiveBase64(map[u].b64, map[u].mime || 'text/csv');" +
+            "      } else if (map[u].blob) {" +
+            "        sendBlob(map[u].blob);" +
+            "      } else {" +
+            "        return false;" +
+            "      }" +
             "      return true;" +
             "    }" +
             "    if (u.indexOf('data:') === 0) {" +
@@ -397,6 +405,19 @@ public class MainActivity extends Activity {
             "      ev.stopPropagation();" +
             "    }" +
             "  }, true);" +
+            "" +
+            "  var origAnchorClick = HTMLAnchorElement.prototype.click;" +
+            "  HTMLAnchorElement.prototype.click = function() {" +
+            "    try {" +
+            "      var href = this.getAttribute('href') || this.href || '';" +
+            "      var isDownload = this.hasAttribute('download');" +
+            "      if (isDownload || href.indexOf('blob:') === 0 || href.indexOf('data:') === 0 ||" +
+            "          href.indexOf('.csv') >= 0 || href.indexOf('format=csv') >= 0) {" +
+            "        if (handleHref(href)) return;" +
+            "      }" +
+            "    } catch (e) {}" +
+            "    return origAnchorClick.apply(this, arguments);" +
+            "  };" +
             "})();";
         webView.evaluateJavascript(js, null);
     }
