@@ -108,6 +108,9 @@ public class MainActivity extends Activity {
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             if (url.startsWith("data:") || url.startsWith("blob:")) {
                 handleBlobOrDataDownload(url, contentDisposition, mimeType);
+            } else if (isLikelyCsvDownload(url, contentDisposition, mimeType)) {
+                // Keep CSV export inside WebView session so authenticated downloads work.
+                handleAuthenticatedWebDownload(url);
             } else {
                 handleUrlDownload(url, userAgent, contentDisposition, mimeType);
             }
@@ -119,6 +122,10 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
+                if (isLikelyCsvDownload(url, null, null)) {
+                    handleAuthenticatedWebDownload(url);
+                    return true;
+                }
                 if (url.contains("inkeepx.com")) return false;
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -326,6 +333,45 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Downloading " + fileName + "…", Toast.LENGTH_SHORT).show();
     }
 
+    // ── Authenticated web download (keeps site session/cookies) ──────────────
+    private void handleAuthenticatedWebDownload(String url) {
+        String safeUrl = url.replace("'", "\\'");
+        String js =
+            "(function() {" +
+            "  fetch('" + safeUrl + "', { credentials: 'include' })" +
+            "    .then(function(r) {" +
+            "      if (!r.ok) throw new Error('HTTP ' + r.status);" +
+            "      return r.blob();" +
+            "    })" +
+            "    .then(function(blob) {" +
+            "      var reader = new FileReader();" +
+            "      reader.onloadend = function() {" +
+            "        var b64 = reader.result.split(',')[1];" +
+            "        AndroidDownload.receiveBase64(b64, blob.type || 'text/csv');" +
+            "      };" +
+            "      reader.readAsDataURL(blob);" +
+            "    })" +
+            "    .catch(function() {" +
+            "      AndroidDownload.receiveBase64('', 'text/error');" +
+            "    });" +
+            "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    private boolean isLikelyCsvDownload(String url, String contentDisposition,
+                                        String mimeType) {
+        String safeUrl = url == null ? "" : url.toLowerCase();
+        String safeContentDisposition =
+            contentDisposition == null ? "" : contentDisposition.toLowerCase();
+        String safeMimeType = mimeType == null ? "" : mimeType.toLowerCase();
+
+        return safeUrl.contains(".csv")
+            || safeUrl.contains("format=csv")
+            || safeContentDisposition.contains(".csv")
+            || safeMimeType.contains("text/csv")
+            || safeMimeType.contains("application/csv");
+    }
+
     // ── Download bridge (receives base64 from JS) ─────────────────────────────
     private class DownloadBridge {
         @android.webkit.JavascriptInterface
@@ -336,6 +382,11 @@ public class MainActivity extends Activity {
 
     private void saveBase64File(String base64, String mimeType) {
         try {
+            if (base64 == null || base64.isEmpty()) {
+                Toast.makeText(this, "Download failed. Please try again.",
+                    Toast.LENGTH_LONG).show();
+                return;
+            }
             String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType);
             if (ext == null) ext = "bin";
             String fileName = "inkeepx_export_" + System.currentTimeMillis() + "." + ext;
