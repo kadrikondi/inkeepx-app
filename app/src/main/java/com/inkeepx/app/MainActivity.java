@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,8 +13,10 @@ import android.hardware.SensorManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
@@ -40,6 +43,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 
 public class MainActivity extends Activity {
 
@@ -497,39 +501,72 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
                 return;
             }
+            if (mimeType == null || mimeType.trim().isEmpty()) mimeType = "application/octet-stream";
             String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType);
-            if (ext == null) ext = "bin";
+            if (ext == null) ext = mimeType.contains("csv") ? "csv" : "bin";
             String fileName = "inkeepx_export_" + System.currentTimeMillis() + "." + ext;
-
-            File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-            if (dir == null) dir = getCacheDir();
-            File file = new File(dir, fileName);
-
             byte[] data = Base64.decode(base64, Base64.DEFAULT);
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(data);
+
+            Uri fileUri;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                fileUri = saveToPublicDownloads(fileName, mimeType, data);
+            } else {
+                fileUri = saveToAppExternalFiles(fileName, data);
             }
 
-            Uri fileUri = FileProvider.getUriForFile(
-                this, getPackageName() + ".fileprovider", file);
-
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(fileUri, mimeType);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-            try {
-                startActivity(intent);
-            } catch (ActivityNotFoundException e) {
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType(mimeType);
-                share.putExtra(Intent.EXTRA_STREAM, fileUri);
-                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                startActivity(Intent.createChooser(share, "Open with"));
-            }
-            Toast.makeText(this, "Saved: " + fileName, Toast.LENGTH_SHORT).show();
+            openDownloadedFile(fileUri, mimeType);
+            Toast.makeText(this, "Saved to Downloads: " + fileName, Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, "Download failed: " + e.getMessage(),
                 Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private Uri saveToPublicDownloads(String fileName, String mimeType, byte[] data)
+            throws Exception {
+        ContentValues values = new ContentValues();
+        values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
+        values.put(MediaStore.Downloads.MIME_TYPE, mimeType);
+        values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+
+        Uri fileUri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        if (fileUri == null) throw new IllegalStateException("Unable to create Downloads record");
+
+        try (OutputStream os = getContentResolver().openOutputStream(fileUri)) {
+            if (os == null) throw new IllegalStateException("Unable to open Downloads stream");
+            os.write(data);
+            os.flush();
+        }
+        return fileUri;
+    }
+
+    private Uri saveToAppExternalFiles(String fileName, byte[] data) throws Exception {
+        File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) dir = getCacheDir();
+        File file = new File(dir, fileName);
+
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            fos.write(data);
+            fos.flush();
+        }
+
+        return FileProvider.getUriForFile(
+            this, getPackageName() + ".fileprovider", file);
+    }
+
+    private void openDownloadedFile(Uri fileUri, String mimeType) {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(fileUri, mimeType);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try {
+            startActivity(intent);
+        } catch (ActivityNotFoundException e) {
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType(mimeType);
+            share.putExtra(Intent.EXTRA_STREAM, fileUri);
+            share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(share, "Open with"));
         }
     }
 
