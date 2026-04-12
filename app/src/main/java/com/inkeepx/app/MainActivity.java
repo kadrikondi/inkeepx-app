@@ -149,6 +149,9 @@ public class MainActivity extends Activity {
                 // Patch window.print() to route through Android PrintManager
                 view.evaluateJavascript(
                     "window.print = function() { AndroidPrint.print(); };", null);
+
+                // Patch download flows (including <a download> + blob:) for WebView.
+                injectDownloadCompatScript();
             }
 
             @Override
@@ -308,6 +311,92 @@ public class MainActivity extends Activity {
             "      };" +
             "      reader.readAsDataURL(blob);" +
             "    });" +
+            "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
+    private void injectDownloadCompatScript() {
+        String js =
+            "(function() {" +
+            "  if (window.__inkeepxDownloadPatched) return;" +
+            "  window.__inkeepxDownloadPatched = true;" +
+            "  window.__inkeepxBlobMap = window.__inkeepxBlobMap || {};" +
+            "  var map = window.__inkeepxBlobMap;" +
+            "  var origCreate = URL.createObjectURL.bind(URL);" +
+            "  var origRevoke = URL.revokeObjectURL.bind(URL);" +
+            "" +
+            "  URL.createObjectURL = function(blob) {" +
+            "    var u = origCreate(blob);" +
+            "    try {" +
+            "      var fr = new FileReader();" +
+            "      fr.onloadend = function() {" +
+            "        var d = String(fr.result || '');" +
+            "        var i = d.indexOf(',');" +
+            "        map[u] = {" +
+            "          b64: i >= 0 ? d.substring(i + 1) : ''," +
+            "          mime: blob && blob.type ? blob.type : 'text/csv'" +
+            "        };" +
+            "      };" +
+            "      fr.readAsDataURL(blob);" +
+            "    } catch (e) {}" +
+            "    return u;" +
+            "  };" +
+            "" +
+            "  URL.revokeObjectURL = function(u) {" +
+            "    try { delete map[u]; } catch (e) {}" +
+            "    return origRevoke(u);" +
+            "  };" +
+            "" +
+            "  function toAbsUrl(href) {" +
+            "    try { return new URL(href, location.href).toString(); }" +
+            "    catch (e) { return href; }" +
+            "  }" +
+            "" +
+            "  function sendBlob(blob) {" +
+            "    var fr = new FileReader();" +
+            "    fr.onloadend = function() {" +
+            "      var d = String(fr.result || '');" +
+            "      var i = d.indexOf(',');" +
+            "      var b64 = i >= 0 ? d.substring(i + 1) : '';" +
+            "      AndroidDownload.receiveBase64(b64, blob.type || 'text/csv');" +
+            "    };" +
+            "    fr.readAsDataURL(blob);" +
+            "  }" +
+            "" +
+            "  function handleHref(href) {" +
+            "    if (!href) return false;" +
+            "    var u = toAbsUrl(href);" +
+            "    if (u.indexOf('blob:') === 0 && map[u] && map[u].b64) {" +
+            "      AndroidDownload.receiveBase64(map[u].b64, map[u].mime || 'text/csv');" +
+            "      return true;" +
+            "    }" +
+            "    if (u.indexOf('data:') === 0) {" +
+            "      var p = u.split(',');" +
+            "      var meta = p[0] || '';" +
+            "      var b64 = p[1] || '';" +
+            "      var m = (meta.split(';')[0] || '').replace('data:', '') || 'text/csv';" +
+            "      AndroidDownload.receiveBase64(b64, m);" +
+            "      return true;" +
+            "    }" +
+            "    if (u.indexOf('.csv') >= 0 || u.indexOf('format=csv') >= 0) {" +
+            "      fetch(u, { credentials: 'include' })" +
+            "        .then(function(r) { return r.blob(); })" +
+            "        .then(sendBlob)" +
+            "        .catch(function() { AndroidDownload.receiveBase64('', 'text/error'); });" +
+            "      return true;" +
+            "    }" +
+            "    return false;" +
+            "  }" +
+            "" +
+            "  document.addEventListener('click', function(ev) {" +
+            "    var a = ev.target && ev.target.closest ? ev.target.closest('a[download],a[href*=\\\".csv\\\"],a[href*=\\\"format=csv\\\"]') : null;" +
+            "    if (!a) return;" +
+            "    var href = a.getAttribute('href') || '';" +
+            "    if (handleHref(href)) {" +
+            "      ev.preventDefault();" +
+            "      ev.stopPropagation();" +
+            "    }" +
+            "  }, true);" +
             "})();";
         webView.evaluateJavascript(js, null);
     }
