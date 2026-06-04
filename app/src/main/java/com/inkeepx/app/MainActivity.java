@@ -1,5 +1,6 @@
 package com.inkeepx.app;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -8,6 +9,7 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorManager;
 import android.net.ConnectivityManager;
@@ -17,6 +19,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
@@ -26,6 +29,7 @@ import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.MimeTypeMap;
+import android.webkit.PermissionRequest;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -38,6 +42,8 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
@@ -58,13 +64,16 @@ public class MainActivity extends Activity {
 
     // File chooser callback — held so we can deliver the result from onActivityResult
     private ValueCallback<Uri[]> fileChooserCallback;
+    // WebView camera request — held while we ask for the Android runtime permission
+    private PermissionRequest pendingPermissionRequest;
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private static final int CAMERA_PERMISSION_REQUEST = 1002;
 
-    private static final String LOGIN_URL     = "https://www.inkeepx.com/login";
-    private static final String PREFS_NAME    = "inkeepx_session";
-    private static final String KEY_LAST_URL  = "last_url";
-    private static final String KEY_LOGGED_IN = "logged_in";
+    private static final String LOGIN_URL      = "https://www.inkeepx.com/login";
+    private static final String PREFS_NAME     = "inkeepx_session";
+    private static final String KEY_LAST_URL   = "last_url";
+    private static final String KEY_LOGGED_IN  = "logged_in";
+    private static final String KEY_CAMERA_ASKED = "camera_asked";
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -207,6 +216,59 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
+
+            // Called when the page (e.g. the barcode scanner) requests camera access
+            // via getUserMedia(). Without this the camera stays permanently blocked.
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean wantsCamera = false;
+                    for (String resource : request.getResources()) {
+                        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                            wantsCamera = true;
+                            break;
+                        }
+                    }
+
+                    // We only handle camera here; deny anything else (e.g. mic) we don't support.
+                    if (!wantsCamera) {
+                        request.deny();
+                        return;
+                    }
+
+                    if (ContextCompat.checkSelfPermission(MainActivity.this,
+                            Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        // Android already allows the camera → grant the web request now.
+                        request.grant(new String[]{ PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+                        return;
+                    }
+
+                    boolean askedBefore = prefs.getBoolean(KEY_CAMERA_ASKED, false);
+                    boolean canShowSystemPrompt = ActivityCompat
+                        .shouldShowRequestPermissionRationale(MainActivity.this,
+                            Manifest.permission.CAMERA);
+
+                    if (askedBefore && !canShowSystemPrompt) {
+                        // Permanently denied — Android won't show its dialog anymore.
+                        // Offer our own Allow / Deny choice (Allow opens app settings).
+                        showCameraPermissionDialog(request);
+                    } else {
+                        // First time, or the user can still be re-prompted by the system.
+                        pendingPermissionRequest = request;
+                        prefs.edit().putBoolean(KEY_CAMERA_ASKED, true).apply();
+                        ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{ Manifest.permission.CAMERA },
+                            CAMERA_PERMISSION_REQUEST);
+                    }
+                });
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (request == pendingPermissionRequest) {
+                    pendingPermissionRequest = null;
+                }
+            }
         });
 
         // ── Shake to reload ───────────────────────────────────────────────────
@@ -272,6 +334,65 @@ public class MainActivity extends Activity {
             // Deliver result (null = cancelled, which is also correct behaviour)
             fileChooserCallback.onReceiveValue(results);
             fileChooserCallback = null;
+        }
+    }
+
+    // ── Camera runtime permission result ──────────────────────────────────────
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            if (pendingPermissionRequest == null) return;
+
+            boolean granted = grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+
+            if (granted) {
+                pendingPermissionRequest.grant(
+                    new String[]{ PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+            } else {
+                pendingPermissionRequest.deny();
+                Toast.makeText(this,
+                    "Camera permission is required to scan barcodes.",
+                    Toast.LENGTH_LONG).show();
+            }
+            pendingPermissionRequest = null;
+        }
+    }
+
+    // Shown when the camera was permanently denied and the system won't re-prompt.
+    // Gives the user an explicit Allow / Deny choice; Allow jumps to app settings.
+    private void showCameraPermissionDialog(final PermissionRequest request) {
+        new AlertDialog.Builder(this)
+            .setTitle("Allow camera access?")
+            .setMessage("InkeepX needs the camera to scan barcodes. "
+                + "Camera access is currently turned off.\n\n"
+                + "Tap Allow to open settings and enable it.")
+            .setCancelable(false)
+            .setPositiveButton("Allow", (d, w) -> {
+                request.deny(); // page request can't wait for the settings round-trip
+                openAppSettings();
+            })
+            .setNegativeButton("Deny", (d, w) -> {
+                request.deny();
+                d.dismiss();
+            })
+            .show();
+    }
+
+    private void openAppSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.fromParts("package", getPackageName(), null));
+            startActivity(intent);
+            Toast.makeText(this,
+                "Enable Camera, then return and tap Scan again.",
+                Toast.LENGTH_LONG).show();
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this,
+                "Open Settings → Apps → InkeepX → Permissions → Camera → Allow.",
+                Toast.LENGTH_LONG).show();
         }
     }
 
