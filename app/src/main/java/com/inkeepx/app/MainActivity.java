@@ -10,14 +10,19 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.hardware.Sensor;
 import android.hardware.SensorManager;
 import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.print.PrintAttributes;
@@ -38,9 +43,11 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.telephony.TelephonyManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -58,9 +65,18 @@ public class MainActivity extends Activity {
     private SwipeRefreshLayout swipeRefresh;
     private LinearLayout offlineView;
     private Button retryButton;
+    private TextView statusBanner;
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
     private SharedPreferences prefs;
+
+    // Shows "still loading" feedback if a page load drags on over a weak network
+    private final Handler slowLoadHandler = new Handler(Looper.getMainLooper());
+    private final Runnable slowLoadNotice = () ->
+        showBanner("Slow connection — still loading…");
+    private static final long SLOW_LOAD_NOTICE_MS = 10_000;
+    // Below this measured bandwidth the connection is treated as slow (≈ weak 3G)
+    private static final int SLOW_BANDWIDTH_KBPS = 1500;
 
     // File chooser callback — held so we can deliver the result from onActivityResult
     private ValueCallback<Uri[]> fileChooserCallback;
@@ -87,6 +103,7 @@ public class MainActivity extends Activity {
         webView      = findViewById(R.id.webView);
         offlineView  = findViewById(R.id.offlineView);
         retryButton  = findViewById(R.id.retryButton);
+        statusBanner = findViewById(R.id.statusBanner);
 
         // ── Cookie persistence ────────────────────────────────────────────────
         CookieManager cookieManager = CookieManager.getInstance();
@@ -115,7 +132,10 @@ public class MainActivity extends Activity {
         webView.setOnScrollChangeListener((v, scrollX, scrollY, oldX, oldY) ->
             swipeRefresh.setEnabled(scrollY == 0));
         swipeRefresh.setColorSchemeColors(0xFFE8000D);
-        swipeRefresh.setOnRefreshListener(() -> webView.reload());
+        swipeRefresh.setOnRefreshListener(() -> {
+            prepareForLoad();
+            webView.reload();
+        });
 
         // ── Download listener ─────────────────────────────────────────────────
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
@@ -147,9 +167,33 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                // Text-first on weak networks: hold images back so content
+                // renders fast; onPageFinished re-enables them and the WebView
+                // fetches the held images automatically.
+                boolean online = isOnline();
+                webView.getSettings().setBlockNetworkImage(!online || isConnectionSlow());
+
+                slowLoadHandler.removeCallbacks(slowLoadNotice);
+                if (!online) {
+                    showBanner("Offline — showing last saved page");
+                } else {
+                    hideBanner();
+                    slowLoadHandler.postDelayed(slowLoadNotice, SLOW_LOAD_NOTICE_MS);
+                }
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 spinner.setVisibility(View.GONE);
                 swipeRefresh.setRefreshing(false);
+                slowLoadHandler.removeCallbacks(slowLoadNotice);
+                webView.getSettings().setBlockNetworkImage(false);
+                if (isOnline()) {
+                    hideBanner();
+                } else {
+                    showBanner("Offline — showing last saved page");
+                }
                 CookieManager.getInstance().flush();
 
                 // Track login state
@@ -170,7 +214,12 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
-                if (request.isForMainFrame()) showOffline();
+                // Only give up when the page itself failed AND there is no
+                // cached copy to fall back on (cache-first already tried it).
+                if (request.isForMainFrame()) {
+                    slowLoadHandler.removeCallbacks(slowLoadNotice);
+                    showOffline();
+                }
             }
         });
 
@@ -276,7 +325,10 @@ public class MainActivity extends Activity {
         shakeDetector = new ShakeDetector(() -> runOnUiThread(() ->
             new AlertDialog.Builder(this)
                 .setMessage("Reload page?")
-                .setPositiveButton("Yes", (d, w) -> webView.reload())
+                .setPositiveButton("Yes", (d, w) -> {
+                    prepareForLoad();
+                    webView.reload();
+                })
                 .setNegativeButton("No",  (d, w) -> d.dismiss())
                 .show()));
 
@@ -284,6 +336,7 @@ public class MainActivity extends Activity {
         retryButton.setOnClickListener(v -> {
             if (isOnline()) {
                 showWeb();
+                prepareForLoad();
                 webView.reload();
             } else {
                 offlineView.animate().alpha(0.5f).setDuration(100)
@@ -294,14 +347,14 @@ public class MainActivity extends Activity {
         });
 
         // ── Initial URL ───────────────────────────────────────────────────────
-        if (!isOnline()) {
-            showOffline();
-            return;
-        }
-
+        // Even with no connection we attempt the load: prepareForLoad() switches
+        // the WebView to cache-first, so a previously visited page renders from
+        // cache. Only if that also fails does onReceivedError show the offline
+        // screen.
         boolean wasLoggedIn = prefs.getBoolean(KEY_LOGGED_IN, false);
         String  lastUrl     = prefs.getString(KEY_LAST_URL, LOGIN_URL);
 
+        prepareForLoad();
         if (wasLoggedIn && lastUrl != null && !lastUrl.contains("/login")) {
             webView.loadUrl(lastUrl);
         } else {
@@ -700,9 +753,55 @@ public class MainActivity extends Activity {
         return net != null && net.isConnected();
     }
 
+    // True when the active connection is measurably weak (≈ 2G / poor 3G).
+    private boolean isConnectionSlow() {
+        ConnectivityManager cm =
+            (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Network network = cm.getActiveNetwork();
+            if (network == null) return false;
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            if (caps == null) return false;
+            int kbps = caps.getLinkDownstreamBandwidthKbps();
+            return kbps > 0 && kbps < SLOW_BANDWIDTH_KBPS;
+        }
+        NetworkInfo net = cm.getActiveNetworkInfo();
+        if (net == null || net.getType() != ConnectivityManager.TYPE_MOBILE) return false;
+        switch (net.getSubtype()) {
+            case TelephonyManager.NETWORK_TYPE_GPRS:
+            case TelephonyManager.NETWORK_TYPE_EDGE:
+            case TelephonyManager.NETWORK_TYPE_CDMA:
+            case TelephonyManager.NETWORK_TYPE_1xRTT:
+            case TelephonyManager.NETWORK_TYPE_IDEN:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Pick the cache strategy for the next load: cache-first when the network
+    // is missing or weak (instant render of previously visited pages), normal
+    // HTTP caching otherwise.
+    private void prepareForLoad() {
+        boolean cacheFirst = !isOnline() || isConnectionSlow();
+        webView.getSettings().setCacheMode(cacheFirst
+            ? WebSettings.LOAD_CACHE_ELSE_NETWORK
+            : WebSettings.LOAD_DEFAULT);
+    }
+
+    private void showBanner(String message) {
+        statusBanner.setText(message);
+        statusBanner.setVisibility(View.VISIBLE);
+    }
+
+    private void hideBanner() {
+        statusBanner.setVisibility(View.GONE);
+    }
+
     private void showOffline() {
         spinner.setVisibility(View.GONE);
         swipeRefresh.setRefreshing(false);
+        hideBanner();
         webView.setVisibility(View.GONE);
         offlineView.setVisibility(View.VISIBLE);
     }
@@ -733,8 +832,14 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
-            webView.goBack();
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (webView.canGoBack()) {
+                webView.goBack();
+            } else {
+                // Keep the loaded page alive in memory instead of destroying
+                // the activity — reopening the app is instant, no reload.
+                moveTaskToBack(true);
+            }
             return true;
         }
         return super.onKeyDown(keyCode, event);

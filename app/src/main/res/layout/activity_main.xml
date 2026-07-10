@@ -15,6 +15,20 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!-- Slim status banner: "offline — showing saved page" / "slow connection" -->
+        <TextView
+            android:id="@+id/statusBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:background="#E6333333"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:visibility="gone" />
+
         <!-- Centered spinner shown during page load -->
         <ProgressBar
             android:id="@+id/spinner"
