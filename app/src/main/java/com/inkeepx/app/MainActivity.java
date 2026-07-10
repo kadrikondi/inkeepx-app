@@ -40,6 +40,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -64,8 +65,10 @@ public class MainActivity extends Activity {
     private ProgressBar spinner;
     private SwipeRefreshLayout swipeRefresh;
     private LinearLayout offlineView;
+    private LinearLayout splashView;
     private Button retryButton;
     private TextView statusBanner;
+    private boolean splashDismissed = false;
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
     private SharedPreferences prefs;
@@ -102,8 +105,13 @@ public class MainActivity extends Activity {
         swipeRefresh = findViewById(R.id.swipeRefresh);
         webView      = findViewById(R.id.webView);
         offlineView  = findViewById(R.id.offlineView);
+        splashView   = findViewById(R.id.splashView);
         retryButton  = findViewById(R.id.retryButton);
         statusBanner = findViewById(R.id.statusBanner);
+
+        // ── Splash greeting (time of day) ─────────────────────────────────────
+        TextView greetingText = findViewById(R.id.greetingText);
+        greetingText.setText(getGreeting());
 
         // ── Cookie persistence ────────────────────────────────────────────────
         CookieManager cookieManager = CookieManager.getInstance();
@@ -189,6 +197,7 @@ public class MainActivity extends Activity {
                 swipeRefresh.setRefreshing(false);
                 slowLoadHandler.removeCallbacks(slowLoadNotice);
                 webView.getSettings().setBlockNetworkImage(false);
+                dismissSplash();
                 if (isOnline()) {
                     hideBanner();
                 } else {
@@ -220,6 +229,34 @@ public class MainActivity extends Activity {
                     slowLoadHandler.removeCallbacks(slowLoadNotice);
                     showOffline();
                 }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                            WebResourceResponse errorResponse) {
+                // Expired session leaves a blank dark error page (401/403/419).
+                // Instead, clear the saved session state and take the user
+                // straight back to the login screen.
+                if (!request.isForMainFrame()) return;
+                int status = errorResponse.getStatusCode();
+                boolean sessionExpired =
+                    status == 401 || status == 403 || status == 419 || status == 440;
+                if (!sessionExpired) return;
+
+                String failedUrl = request.getUrl().toString();
+                if (failedUrl.contains("/login")) return; // never loop on login itself
+
+                prefs.edit()
+                    .putBoolean(KEY_LOGGED_IN, false)
+                    .putString(KEY_LAST_URL, LOGIN_URL)
+                    .apply();
+
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this,
+                        "Session expired — please log in again.", Toast.LENGTH_LONG).show();
+                    prepareForLoad();
+                    webView.loadUrl(LOGIN_URL);
+                });
             }
         });
 
@@ -789,6 +826,24 @@ public class MainActivity extends Activity {
             : WebSettings.LOAD_DEFAULT);
     }
 
+    // Greeting for the splash screen based on the device clock
+    private String getGreeting() {
+        int hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
+        if (hour >= 5  && hour < 12) return "Good Morning";
+        if (hour >= 12 && hour < 17) return "Good Afternoon";
+        if (hour >= 17 && hour < 21) return "Good Evening";
+        return "Good Night";
+    }
+
+    // Fade the splash out once the first page has rendered (runs only once)
+    private void dismissSplash() {
+        if (splashDismissed) return;
+        splashDismissed = true;
+        splashView.animate().alpha(0f).setDuration(400)
+            .withEndAction(() -> splashView.setVisibility(View.GONE))
+            .start();
+    }
+
     private void showBanner(String message) {
         statusBanner.setText(message);
         statusBanner.setVisibility(View.VISIBLE);
@@ -802,6 +857,9 @@ public class MainActivity extends Activity {
         spinner.setVisibility(View.GONE);
         swipeRefresh.setRefreshing(false);
         hideBanner();
+        // Splash must not cover the offline screen
+        splashDismissed = true;
+        splashView.setVisibility(View.GONE);
         webView.setVisibility(View.GONE);
         offlineView.setVisibility(View.VISIBLE);
     }

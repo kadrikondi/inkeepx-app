@@ -129,6 +129,77 @@
 
         </LinearLayout>
 
+        <!-- Splash / greeting screen shown while the first page loads -->
+        <LinearLayout
+            android:id="@+id/splashView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="40dp"
+            android:background="#000000"
+            android:visibility="visible">
+
+            <!-- Logo mark: red rounded square with X -->
+            <FrameLayout
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                android:layout_marginBottom="32dp">
+
+                <View
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:background="@drawable/offline_logo_bg" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="inkeepX"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black" />
+            </FrameLayout>
+
+            <!-- Time-based greeting, set at runtime -->
+            <TextView
+                android:id="@+id/greetingText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Good Morning"
+                android:textColor="#FFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Welcome to InkeepX"
+                android:textColor="#E8000D"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Modern Inventory &amp; POS Solutions"
+                android:textColor="#999999"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:layout_marginBottom="40dp" />
+
+            <ProgressBar
+                style="@android:style/Widget.Material.ProgressBar"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:indeterminateTint="#E8000D" />
+
+        </LinearLayout>
+
     </RelativeLayout>
 
 </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
