@@ -67,6 +67,10 @@ public class MainActivity extends Activity {
     private LinearLayout offlineView;
     private LinearLayout splashView;
     private Button retryButton;
+    private Button goBackButton;
+    private TextView offlineIcon;
+    private TextView offlineTitle;
+    private TextView offlineSubtitle;
     private TextView statusBanner;
     private boolean splashDismissed = false;
     private SensorManager sensorManager;
@@ -83,6 +87,8 @@ public class MainActivity extends Activity {
 
     // File chooser callback — held so we can deliver the result from onActivityResult
     private ValueCallback<Uri[]> fileChooserCallback;
+    // Where the camera writes its photo when the user picks "Camera" in the chooser
+    private Uri cameraPhotoUri;
     // WebView camera request — held while we ask for the Android runtime permission
     private PermissionRequest pendingPermissionRequest;
     private static final int FILE_CHOOSER_REQUEST = 1001;
@@ -104,10 +110,14 @@ public class MainActivity extends Activity {
         spinner      = findViewById(R.id.spinner);
         swipeRefresh = findViewById(R.id.swipeRefresh);
         webView      = findViewById(R.id.webView);
-        offlineView  = findViewById(R.id.offlineView);
-        splashView   = findViewById(R.id.splashView);
-        retryButton  = findViewById(R.id.retryButton);
-        statusBanner = findViewById(R.id.statusBanner);
+        offlineView     = findViewById(R.id.offlineView);
+        splashView      = findViewById(R.id.splashView);
+        retryButton     = findViewById(R.id.retryButton);
+        goBackButton    = findViewById(R.id.goBackButton);
+        offlineIcon     = findViewById(R.id.offlineIcon);
+        offlineTitle    = findViewById(R.id.offlineTitle);
+        offlineSubtitle = findViewById(R.id.offlineSubtitle);
+        statusBanner    = findViewById(R.id.statusBanner);
 
         // ── Splash greeting (time of day) ─────────────────────────────────────
         TextView greetingText = findViewById(R.id.greetingText);
@@ -241,22 +251,32 @@ public class MainActivity extends Activity {
                 int status = errorResponse.getStatusCode();
                 boolean sessionExpired =
                     status == 401 || status == 403 || status == 419 || status == 440;
-                if (!sessionExpired) return;
 
-                String failedUrl = request.getUrl().toString();
-                if (failedUrl.contains("/login")) return; // never loop on login itself
+                if (sessionExpired) {
+                    String failedUrl = request.getUrl().toString();
+                    if (failedUrl.contains("/login")) return; // never loop on login itself
 
-                prefs.edit()
-                    .putBoolean(KEY_LOGGED_IN, false)
-                    .putString(KEY_LAST_URL, LOGIN_URL)
-                    .apply();
+                    prefs.edit()
+                        .putBoolean(KEY_LOGGED_IN, false)
+                        .putString(KEY_LAST_URL, LOGIN_URL)
+                        .apply();
 
-                runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this,
-                        "Session expired — please log in again.", Toast.LENGTH_LONG).show();
-                    prepareForLoad();
-                    webView.loadUrl(LOGIN_URL);
-                });
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this,
+                            "Session expired — please log in again.", Toast.LENGTH_LONG).show();
+                        prepareForLoad();
+                        webView.loadUrl(LOGIN_URL);
+                    });
+                    return;
+                }
+
+                // Any other main-page error (404, 500, …) used to leave a blank
+                // page with nothing to tap — especially bad on gesture-nav
+                // tablets. Show our error screen with Try Again / Go Back.
+                if (status >= 400) {
+                    slowLoadHandler.removeCallbacks(slowLoadNotice);
+                    runOnUiThread(() -> showError(status));
+                }
             }
         });
 
@@ -284,8 +304,31 @@ public class MainActivity extends Activity {
                 // Build an intent that lets the user pick from files OR camera
                 Intent fileIntent = fileChooserParams.createIntent();
 
-                // Also add a camera capture option for image fields
-                Intent cameraIntent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+                // Camera capture option: without EXTRA_OUTPUT the camera app
+                // returns no usable URI and the upload silently fails, so we
+                // point it at a file of our own via the FileProvider.
+                Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                cameraPhotoUri = null;
+                try {
+                    File photoDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+                    if (photoDir == null) photoDir = getCacheDir();
+                    File photoFile = new File(photoDir,
+                        "camera_" + System.currentTimeMillis() + ".jpg");
+                    cameraPhotoUri = FileProvider.getUriForFile(
+                        MainActivity.this, getPackageName() + ".fileprovider", photoFile);
+                    cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, cameraPhotoUri);
+                    cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    // Some camera apps ignore the intent flags — grant explicitly.
+                    for (android.content.pm.ResolveInfo ri :
+                            getPackageManager().queryIntentActivities(cameraIntent, 0)) {
+                        grantUriPermission(ri.activityInfo.packageName, cameraPhotoUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    }
+                } catch (Exception e) {
+                    cameraPhotoUri = null; // camera option degrades, file picking still works
+                }
 
                 // Combine both into a chooser so user can pick source
                 Intent chooser = Intent.createChooser(fileIntent, "Select File");
@@ -383,6 +426,17 @@ public class MainActivity extends Activity {
             }
         });
 
+        // ── Go Back button (server-error screen) ──────────────────────────────
+        goBackButton.setOnClickListener(v -> {
+            showWeb();
+            prepareForLoad();
+            if (webView.canGoBack()) {
+                webView.goBack();
+            } else {
+                webView.loadUrl(LOGIN_URL);
+            }
+        });
+
         // ── Initial URL ───────────────────────────────────────────────────────
         // Even with no connection we attempt the load: prepareForLoad() switches
         // the WebView to cache-first, so a previously visited page renders from
@@ -407,20 +461,22 @@ public class MainActivity extends Activity {
 
             Uri[] results = null;
             if (resultCode == Activity.RESULT_OK) {
-                if (data != null) {
-                    String dataString = data.getDataString();
-                    if (dataString != null) {
-                        results = new Uri[]{ Uri.parse(dataString) };
-                    } else if (data.getClipData() != null) {
-                        // Multiple files selected
-                        int count = data.getClipData().getItemCount();
-                        results = new Uri[count];
-                        for (int i = 0; i < count; i++) {
-                            results[i] = data.getClipData().getItemAt(i).getUri();
-                        }
+                if (data != null && data.getDataString() != null) {
+                    results = new Uri[]{ Uri.parse(data.getDataString()) };
+                } else if (data != null && data.getClipData() != null) {
+                    // Multiple files selected
+                    int count = data.getClipData().getItemCount();
+                    results = new Uri[count];
+                    for (int i = 0; i < count; i++) {
+                        results[i] = data.getClipData().getItemAt(i).getUri();
                     }
+                } else if (cameraPhotoUri != null) {
+                    // Camera apps return an empty intent when EXTRA_OUTPUT is
+                    // used — the photo is in the file we provided.
+                    results = new Uri[]{ cameraPhotoUri };
                 }
             }
+            cameraPhotoUri = null;
             // Deliver result (null = cancelled, which is also correct behaviour)
             fileChooserCallback.onReceiveValue(results);
             fileChooserCallback = null;
@@ -854,10 +910,31 @@ public class MainActivity extends Activity {
     }
 
     private void showOffline() {
+        offlineIcon.setText("📡");
+        offlineTitle.setText("You're Offline");
+        offlineSubtitle.setText("Connect to Wi-Fi or mobile data\nto continue using InkeepX.");
+        goBackButton.setVisibility(View.GONE);
+        showErrorScreen();
+    }
+
+    // Server-side failure (404, 500, …): same screen, different words,
+    // plus a Go Back button so the user is never stuck.
+    private void showError(int status) {
+        offlineIcon.setText("⚠️");
+        offlineTitle.setText("Something Went Wrong");
+        String hint = status == 404
+            ? "That page could not be found."
+            : "The server had a problem loading this page.";
+        offlineSubtitle.setText(hint + "\n(Error " + status + ")");
+        goBackButton.setVisibility(View.VISIBLE);
+        showErrorScreen();
+    }
+
+    private void showErrorScreen() {
         spinner.setVisibility(View.GONE);
         swipeRefresh.setRefreshing(false);
         hideBanner();
-        // Splash must not cover the offline screen
+        // Splash must not cover the error screen
         splashDismissed = true;
         splashView.setVisibility(View.GONE);
         webView.setVisibility(View.GONE);
@@ -892,6 +969,9 @@ public class MainActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (webView.canGoBack()) {
+                // If the error/offline screen is up, reveal the WebView again
+                // so the page we navigate back to is actually visible.
+                showWeb();
                 webView.goBack();
             } else {
                 // Keep the loaded page alive in memory instead of destroying
