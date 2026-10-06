@@ -1,0 +1,200 @@
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:631: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+            host = host.toLowerCase();
+                        ~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:660: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+        if (contentDisposition != null && contentDisposition.toLowerCase().contains("filename")) {
+                                                             ~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:879: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+        String safeUrl = url == null ? "" : url.toLowerCase();
+                                                ~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:881: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+            contentDisposition == null ? "" : contentDisposition.toLowerCase();
+                                                                 ~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:882: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+        String safeMimeType = mimeType == null ? "" : mimeType.toLowerCase();
+                                                               ~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:923: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+            mimeType = mimeType.split(";")[0].trim().toLowerCase();
+                                                     ~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:1035: Warning: Implicitly using the default locale is a common source of bugs: Use toLowerCase(Locale) instead. For strings meant to be internal use Locale.ROOT, otherwise Locale.getDefault(). [DefaultLocale]
+                String type = f.optString("type", "").split(";")[0].trim().toLowerCase();
+                                                                           ~~~~~~~~~~~
+
+   Explanation for issues of type "DefaultLocale":
+   Calling String#toLowerCase() or #toUpperCase() without specifying an
+   explicit locale is a common source of bugs. The reason for that is that
+   those methods will use the current locale on the user's device, and even
+   though the code appears to work correctly when you are developing the app,
+   it will fail in some locales. For example, in the Turkish locale, the
+   uppercase replacement for i is not I.
+
+   If you want the methods to just perform ASCII replacement, for example to
+   convert an enum name, call String#toUpperCase(Locale.US) instead. If you
+   really want to use the current locale, call
+   String#toUpperCase(Locale.getDefault()) instead.
+
+   https://developer.android.com/reference/java/util/Locale.html#default_locale
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\build.gradle:12: Warning: Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details. [OldTargetApi]
+        targetSdk 34
+        ~~~~~~~~~~~~
+
+   Explanation for issues of type "OldTargetApi":
+   When your application runs on a version of Android that is more recent than
+   your targetSdkVersion specifies that it has been tested with, various
+   compatibility modes kick in. This ensures that your application continues
+   to work, but it may look out of place. For example, if the targetSdkVersion
+   is less than 14, your app may get an option button in the UI.
+
+   To fix this issue, set the targetSdkVersion to the highest available value.
+   Then test your app to make sure everything works correctly. You may want to
+   consult the compatibility notes to see what changes apply to each version
+   you are adding support for:
+   https://developer.android.com/reference/android/os/Build.VERSION_CODES.html
+   as well as follow this guide:
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.
+   html
+
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.html
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:30: Warning: Attribute usesCleartextTraffic is only used in API level 23 and higher (current min is 21) [UnusedAttribute]
+        android:usesCleartextTraffic="false">
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "UnusedAttribute":
+   This check finds attributes set in XML files that were introduced in a
+   version newer than the oldest version targeted by your application (with
+   the minSdkVersion attribute).
+
+   This is not an error; the application will simply ignore the attribute.
+   However, if the attribute is important to the appearance or functionality
+   of your application, you should consider finding an alternative way to
+   achieve the same result with only available attributes, and then you can
+   optionally create a copy of the layout in a layout-vNN folder which will be
+   used on API NN or higher where you can take advantage of the newer
+   attribute.
+
+   Note: This check does not only apply to attributes. For example, some tags
+   can be unused too, such as the new <tag> element in layouts introduced in
+   API 21.
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\build.gradle:31: Warning: A newer version of androidx.swiperefreshlayout:swiperefreshlayout than 1.1.0 is available: 1.2.0 [GradleDependency]
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\build.gradle:32: Warning: A newer version of androidx.core:core than 1.12.0 is available: 1.19.1 [GradleDependency]
+    implementation 'androidx.core:core:1.12.0'
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\build.gradle:35: Warning: A newer version of androidx.webkit:webkit than 1.9.0 is available: 1.17.1 [GradleDependency]
+    implementation 'androidx.webkit:webkit:1.9.0'
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "GradleDependency":
+   This detector looks for usages of libraries where the version you are using
+   is not the current stable release. Using older versions is fine, and there
+   are cases where you deliberately want to stick with an older version.
+   However, you may simply not be aware that a more recent version is
+   available, and that is what this lint check helps find.
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-hdpi\ic_launcher.png: Warning: Launcher icons should not fill every pixel of their square region; see the design guide for details [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-mdpi\ic_launcher.png: Warning: Launcher icons should not fill every pixel of their square region; see the design guide for details [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xhdpi\ic_launcher.png: Warning: Launcher icons should not fill every pixel of their square region; see the design guide for details [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xxhdpi\ic_launcher.png: Warning: Launcher icons should not fill every pixel of their square region; see the design guide for details [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xxxhdpi\ic_launcher.png: Warning: Launcher icons should not fill every pixel of their square region; see the design guide for details [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-hdpi\ic_launcher_round.png: Warning: Launcher icon used as round icon did not have a circular shape [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-mdpi\ic_launcher_round.png: Warning: Launcher icon used as round icon did not have a circular shape [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xhdpi\ic_launcher_round.png: Warning: Launcher icon used as round icon did not have a circular shape [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xxhdpi\ic_launcher_round.png: Warning: Launcher icon used as round icon did not have a circular shape [IconLauncherShape]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xxxhdpi\ic_launcher_round.png: Warning: Launcher icon used as round icon did not have a circular shape [IconLauncherShape]
+
+   Explanation for issues of type "IconLauncherShape":
+   According to the Android Design Guide
+   (https://d.android.com/r/studio-ui/designer/material/iconography) your
+   launcher icons should "use a distinct silhouette", a "three-dimensional,
+   front view, with a slight perspective as if viewed from above, so that
+   users perceive some depth."
+
+   The unique silhouette implies that your launcher icon should not be a
+   filled square.
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-hdpi\ic_launcher_round.png: Warning: The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png [IconDuplicates]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-mdpi\ic_launcher_round.png: Warning: The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png [IconDuplicates]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xhdpi\ic_launcher_round.png: Warning: The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png [IconDuplicates]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xxhdpi\ic_launcher_round.png: Warning: The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png [IconDuplicates]
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\mipmap-xxxhdpi\ic_launcher_round.png: Warning: The following unrelated icon files have identical contents: ic_launcher.png, ic_launcher_round.png [IconDuplicates]
+
+   Explanation for issues of type "IconDuplicates":
+   If an icon is repeated under different names, you can consolidate and just
+   use one of the icons and delete the others to make your application
+   smaller. However, duplicated icons usually are not intentional and can
+   sometimes point to icons that were accidentally overwritten or accidentally
+   not updated.
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:1292: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        offlineTitle.setText("You're Offline");
+                             ~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\java\com\inkeepx\app\MainActivity.java:1308: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        offlineSubtitle.setText(hint + "\n(Error " + status + ")");
+                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "SetTextI18n":
+   When calling TextView#setText
+   * Never call Number#toString() to format numbers; it will not handle
+   fraction separators and locale-specific digits properly. Consider using
+   String#format with proper format specifications (%d or %f) instead.
+   * Do not pass a string literal (e.g. "Hello") to display text. Hardcoded
+   text can not be properly translated to other languages. Consider using
+   Android resource strings instead.
+   * Do not build messages by concatenating text chunks. Such messages can not
+   be properly translated.
+
+   https://developer.android.com/guide/topics/resources/localization.html
+
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:68: Warning: Hardcoded string "inkeepX", should use @string resource [HardcodedText]
+                    android:text="inkeepX"
+                    ~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:79: Warning: Hardcoded string "InkeepX", should use @string resource [HardcodedText]
+                android:text="InkeepX"
+                ~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:92: Warning: Hardcoded string "📡", should use @string resource [HardcodedText]
+                android:text="📡"
+                ~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:101: Warning: Hardcoded string "You're Offline", should use @string resource [HardcodedText]
+                android:text="You're Offline"
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:113: Warning: Hardcoded string "Connect to Wi-Fi or mobile datanto continue using InkeepX.", should use @string resource [HardcodedText]
+                android:text="Connect to Wi-Fi or mobile data\nto continue using InkeepX."
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:125: Warning: Hardcoded string "Try Again", should use @string resource [HardcodedText]
+                android:text="Try Again"
+                ~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:139: Warning: Hardcoded string "Go Back", should use @string resource [HardcodedText]
+                android:text="Go Back"
+                ~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:176: Warning: Hardcoded string "inkeepX", should use @string resource [HardcodedText]
+                    android:text="inkeepX"
+                    ~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:188: Warning: Hardcoded string "Good Morning", should use @string resource [HardcodedText]
+                android:text="Good Morning"
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:198: Warning: Hardcoded string "Welcome to InkeepX", should use @string resource [HardcodedText]
+                android:text="Welcome to InkeepX"
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\res\layout\activity_main.xml:207: Warning: Hardcoded string "Modern Inventory & POS Solutions", should use @string resource [HardcodedText]
+                android:text="Modern Inventory &amp; POS Solutions"
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "HardcodedText":
+   Hardcoding text attributes directly in layout files is bad for several
+   reasons:
+
+   * When creating configuration variations (for example for landscape or
+   portrait) you have to repeat the actual text (and keep it up to date when
+   making changes)
+
+   * The application cannot be translated to other languages by just adding
+   new translations for existing string resources.
+
+   There are quickfixes to automatically extract this hardcoded string into a
+   resource lookup.
+
+0 errors, 40 warnings

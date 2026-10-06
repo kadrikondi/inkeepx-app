@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
@@ -17,6 +18,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -54,10 +56,18 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 
 public class MainActivity extends Activity {
 
@@ -73,6 +83,9 @@ public class MainActivity extends Activity {
     private TextView offlineSubtitle;
     private TextView statusBanner;
     private boolean splashDismissed = false;
+
+    // Auto-reload when internet returns while the offline/error screen is showing
+    private ConnectivityManager.NetworkCallback networkCallback;
     private SensorManager sensorManager;
     private ShakeDetector shakeDetector;
     private SharedPreferences prefs;
@@ -95,6 +108,10 @@ public class MainActivity extends Activity {
     private static final int CAMERA_PERMISSION_REQUEST = 1002;
 
     private static final String LOGIN_URL      = "https://www.inkeepx.com/login";
+    private static final String SITE_DOMAIN    = "inkeepx.com";
+    // True once the share/print bootstrap is registered to run at document
+    // start; otherwise it is injected (best effort) in onPageStarted.
+    private boolean documentStartScriptInstalled = false;
     private static final String PREFS_NAME     = "inkeepx_session";
     private static final String KEY_LAST_URL   = "last_url";
     private static final String KEY_LOGGED_IN  = "logged_in";
@@ -145,10 +162,17 @@ public class MainActivity extends Activity {
         // ── JS interfaces ─────────────────────────────────────────────────────
         webView.addJavascriptInterface(new PrintBridge(), "AndroidPrint");
         webView.addJavascriptInterface(new DownloadBridge(), "AndroidDownload");
+        webView.addJavascriptInterface(new ShareBridge(), "AndroidShare");
+
+        // navigator.share() does not exist in Android WebView, so the site's
+        // invoice "Share" button hides itself. Install a polyfill that routes
+        // to the native share sheet — it must exist BEFORE page scripts run.
+        installDocumentStartScript();
 
         // ── Pull-to-refresh guard ─────────────────────────────────────────────
-        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldX, oldY) ->
-            swipeRefresh.setEnabled(scrollY == 0));
+        // (View.setOnScrollChangeListener is API 23+; this works on API 21.)
+        webView.getViewTreeObserver().addOnScrollChangedListener(() ->
+            swipeRefresh.setEnabled(webView.getScrollY() == 0));
         swipeRefresh.setColorSchemeColors(0xFFE8000D);
         swipeRefresh.setOnRefreshListener(() -> {
             prepareForLoad();
@@ -172,20 +196,24 @@ public class MainActivity extends Activity {
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (isLikelyCsvDownload(url, null, null)) {
-                    handleAuthenticatedWebDownload(url);
-                    return true;
-                }
-                if (url.contains("inkeepx.com")) return false;
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                } catch (ActivityNotFoundException ignored) {}
-                return true;
+                return handleUrlOverride(request.getUrl().toString());
+            }
+
+            // Android 5–6 (API 21–23) only call this older overload.
+            @SuppressWarnings("deprecation")
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handleUrlOverride(url);
             }
 
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                // Fallback for WebViews without document-start script support:
+                // inject the share/print bootstrap as early as we can.
+                if (!documentStartScriptInstalled) {
+                    view.evaluateJavascript(buildBootstrapScript(), null);
+                }
+
                 // Text-first on weak networks: hold images back so content
                 // renders fast; onPageFinished re-enables them and the WebView
                 // fetches the held images automatically.
@@ -222,9 +250,9 @@ public class MainActivity extends Activity {
                     .putString(KEY_LAST_URL, onLoginPage ? LOGIN_URL : url)
                     .apply();
 
-                // Patch window.print() to route through Android PrintManager
-                view.evaluateJavascript(
-                    "window.print = function() { AndroidPrint.print(); };", null);
+                // Make sure the share polyfill + print patch are present even if
+                // the early injection was missed (the script is idempotent).
+                view.evaluateJavascript(buildBootstrapScript(), null);
 
                 // Patch download flows (including <a download> + blob:) for WebView.
                 injectDownloadCompatScript();
@@ -241,6 +269,18 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Android 5–6 (API 21–22) only call this older overload, and only
+            // for the main frame — without it those devices never saw the
+            // offline screen, just a blank WebView error page.
+            @SuppressWarnings("deprecation")
+            @Override
+            public void onReceivedError(WebView view, int errorCode,
+                                        String description, String failingUrl) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) return; // new overload handles it
+                slowLoadHandler.removeCallbacks(slowLoadNotice);
+                showOffline();
+            }
+
             @Override
             public void onReceivedHttpError(WebView view, WebResourceRequest request,
                                             WebResourceResponse errorResponse) {
@@ -249,8 +289,12 @@ public class MainActivity extends Activity {
                 // straight back to the login screen.
                 if (!request.isForMainFrame()) return;
                 int status = errorResponse.getStatusCode();
+                // 403 is NOT treated as expiry: the site returns 403 when a
+                // logged-in staff member lacks permission for a page. Bouncing
+                // them to /login (which redirects straight back) looked like a
+                // broken app. It now gets the error screen with a clear message.
                 boolean sessionExpired =
-                    status == 401 || status == 403 || status == 419 || status == 440;
+                    status == 401 || status == 419 || status == 440;
 
                 if (sessionExpired) {
                     String failedUrl = request.getUrl().toString();
@@ -559,29 +603,86 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Decides whether a navigation stays in the app, is a download, or opens
+    // in an external app (browser, mail, phone, WhatsApp…).
+    private boolean handleUrlOverride(String url) {
+        if (url == null) return false;
+        if (isLikelyCsvDownload(url, null, null)) {
+            handleAuthenticatedWebDownload(url);
+            return true;
+        }
+        if (isSiteUrl(url)) return false;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "No app found to open this link.", Toast.LENGTH_SHORT).show();
+        } catch (Exception ignored) {}
+        return true;
+    }
+
+    // Host-based check: "https://evil.com/?r=inkeepx.com" must not count as ours.
+    private boolean isSiteUrl(String url) {
+        try {
+            Uri uri = Uri.parse(url);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (host == null || scheme == null) return false;
+            if (!scheme.equals("https") && !scheme.equals("http")) return false;
+            host = host.toLowerCase();
+            return host.equals(SITE_DOMAIN) || host.endsWith("." + SITE_DOMAIN);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Shared JS: turn a data: URL into {b64, mime} regardless of whether it
+    // is base64 or percent-encoded text (the old code assumed base64 and
+    // produced a corrupt file for "data:text/csv,...").
+    private static final String JS_DATA_URL_HELPER =
+        "function __inkeepxParseDataUrl(u) {" +
+        "  var c = u.indexOf(','); if (c < 0) return null;" +
+        "  var meta = u.substring(5, c); var payload = u.substring(c + 1);" +
+        "  var parts = meta.split(';'); var mime = parts[0] || 'application/octet-stream';" +
+        "  var isB64 = parts.indexOf('base64') >= 0;" +
+        "  var b64;" +
+        "  if (isB64) { b64 = payload; }" +
+        "  else {" +
+        "    try { b64 = btoa(unescape(encodeURIComponent(decodeURIComponent(payload)))); }" +
+        "    catch (e) { try { b64 = btoa(unescape(payload)); } catch (e2) { b64 = ''; } }" +
+        "  }" +
+        "  return { b64: b64, mime: mime };" +
+        "}";
+
     // ── Blob / data: URI download ─────────────────────────────────────────────
     private void handleBlobOrDataDownload(String url, String contentDisposition,
                                           String mimeType) {
-        String safeUrl = url.replace("'", "\\'");
+        String fileName = null;
+        if (contentDisposition != null && contentDisposition.toLowerCase().contains("filename")) {
+            fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+        }
         String js =
             "(function() {" +
-            "  var url = '" + safeUrl + "';" +
-            "  if (url.startsWith('data:')) {" +
-            "    var base64 = url.split(',')[1];" +
-            "    var mime = url.split(';')[0].split(':')[1];" +
-            "    AndroidDownload.receiveBase64(base64, mime);" +
+            JS_DATA_URL_HELPER +
+            "  var url = " + JSONObject.quote(url) + ";" +
+            "  var name = " + JSONObject.quote(fileName == null ? "" : fileName) + ";" +
+            "  if (url.indexOf('data:') === 0) {" +
+            "    var d = __inkeepxParseDataUrl(url);" +
+            "    if (!d) { AndroidDownload.receiveBase64('', 'text/error'); return; }" +
+            "    AndroidDownload.receiveFile(d.b64, d.mime, name);" +
             "    return;" +
             "  }" +
             "  fetch(url)" +
-            "    .then(r => r.blob())" +
-            "    .then(blob => {" +
+            "    .then(function(r) { return r.blob(); })" +
+            "    .then(function(blob) {" +
             "      var reader = new FileReader();" +
             "      reader.onloadend = function() {" +
-            "        var b64 = reader.result.split(',')[1];" +
-            "        AndroidDownload.receiveBase64(b64, blob.type);" +
+            "        var s = String(reader.result || ''); var i = s.indexOf(',');" +
+            "        AndroidDownload.receiveFile(i >= 0 ? s.substring(i + 1) : '', blob.type, name);" +
             "      };" +
+            "      reader.onerror = function() { AndroidDownload.receiveBase64('', 'text/error'); };" +
             "      reader.readAsDataURL(blob);" +
-            "    });" +
+            "    })" +
+            "    .catch(function() { AndroidDownload.receiveBase64('', 'text/error'); });" +
             "})();";
         webView.evaluateJavascript(js, null);
     }
@@ -625,42 +726,52 @@ public class MainActivity extends Activity {
             "    catch (e) { return href; }" +
             "  }" +
             "" +
-            "  function sendBlob(blob) {" +
+            JS_DATA_URL_HELPER +
+            "" +
+            "  function sendBlob(blob, name) {" +
             "    var fr = new FileReader();" +
             "    fr.onloadend = function() {" +
             "      var d = String(fr.result || '');" +
             "      var i = d.indexOf(',');" +
             "      var b64 = i >= 0 ? d.substring(i + 1) : '';" +
-            "      AndroidDownload.receiveBase64(b64, blob.type || 'text/csv');" +
+            "      AndroidDownload.receiveFile(b64, blob.type || 'text/csv', name || '');" +
             "    };" +
+            "    fr.onerror = function() { AndroidDownload.receiveBase64('', 'text/error'); };" +
             "    fr.readAsDataURL(blob);" +
             "  }" +
             "" +
-            "  function handleHref(href) {" +
+            "  function nameFromUrl(u) {" +
+            "    try {" +
+            "      var p = new URL(u, location.href).pathname.split('/').pop() || '';" +
+            "      return /\\.[a-z0-9]{2,5}$/i.test(p) ? decodeURIComponent(p) : '';" +
+            "    } catch (e) { return ''; }" +
+            "  }" +
+            "" +
+            "  function handleHref(href, name) {" +
             "    if (!href) return false;" +
             "    var u = toAbsUrl(href);" +
+            "    name = name || '';" +
             "    if (u.indexOf('blob:') === 0 && map[u]) {" +
             "      if (map[u].b64) {" +
-            "        AndroidDownload.receiveBase64(map[u].b64, map[u].mime || 'text/csv');" +
+            "        AndroidDownload.receiveFile(map[u].b64, map[u].mime || 'text/csv', name);" +
             "      } else if (map[u].blob) {" +
-            "        sendBlob(map[u].blob);" +
+            "        sendBlob(map[u].blob, name);" +
             "      } else {" +
             "        return false;" +
             "      }" +
             "      return true;" +
             "    }" +
             "    if (u.indexOf('data:') === 0) {" +
-            "      var p = u.split(',');" +
-            "      var meta = p[0] || '';" +
-            "      var b64 = p[1] || '';" +
-            "      var m = (meta.split(';')[0] || '').replace('data:', '') || 'text/csv';" +
-            "      AndroidDownload.receiveBase64(b64, m);" +
+            "      var d = __inkeepxParseDataUrl(u);" +
+            "      if (!d) return false;" +
+            "      AndroidDownload.receiveFile(d.b64, d.mime || 'text/csv', name);" +
             "      return true;" +
             "    }" +
             "    if (u.indexOf('.csv') >= 0 || u.indexOf('format=csv') >= 0) {" +
+            "      var n = name || nameFromUrl(u);" +
             "      fetch(u, { credentials: 'include' })" +
-            "        .then(function(r) { return r.blob(); })" +
-            "        .then(sendBlob)" +
+            "        .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })" +
+            "        .then(function(b) { sendBlob(b, n); })" +
             "        .catch(function() { AndroidDownload.receiveBase64('', 'text/error'); });" +
             "      return true;" +
             "    }" +
@@ -671,7 +782,7 @@ public class MainActivity extends Activity {
             "    var a = ev.target && ev.target.closest ? ev.target.closest('a[download],a[href*=\\\".csv\\\"],a[href*=\\\"format=csv\\\"]') : null;" +
             "    if (!a) return;" +
             "    var href = a.getAttribute('href') || '';" +
-            "    if (handleHref(href)) {" +
+            "    if (handleHref(href, a.getAttribute('download') || '')) {" +
             "      ev.preventDefault();" +
             "      ev.stopPropagation();" +
             "    }" +
@@ -684,7 +795,7 @@ public class MainActivity extends Activity {
             "      var isDownload = this.hasAttribute('download');" +
             "      if (isDownload || href.indexOf('blob:') === 0 || href.indexOf('data:') === 0 ||" +
             "          href.indexOf('.csv') >= 0 || href.indexOf('format=csv') >= 0) {" +
-            "        if (handleHref(href)) return;" +
+            "        if (handleHref(href, this.getAttribute('download') || '')) return;" +
             "      }" +
             "    } catch (e) {}" +
             "    return origAnchorClick.apply(this, arguments);" +
@@ -696,40 +807,64 @@ public class MainActivity extends Activity {
     // ── Regular URL download via DownloadManager ──────────────────────────────
     private void handleUrlDownload(String url, String userAgent,
                                    String contentDisposition, String mimeType) {
-        android.app.DownloadManager.Request request =
-            new android.app.DownloadManager.Request(Uri.parse(url));
         String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
-        request.setTitle(fileName);
-        request.setDescription("Downloading via InkeepX");
-        request.setMimeType(mimeType);
-        String cookies = CookieManager.getInstance().getCookie(url);
-        if (cookies != null) request.addRequestHeader("Cookie", cookies);
-        request.addRequestHeader("User-Agent", userAgent);
-        request.setNotificationVisibility(
-            android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-        android.app.DownloadManager dm =
-            (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-        dm.enqueue(request);
-        Toast.makeText(this, "Downloading " + fileName + "…", Toast.LENGTH_SHORT).show();
+        try {
+            android.app.DownloadManager.Request request =
+                new android.app.DownloadManager.Request(Uri.parse(url));
+            request.setTitle(fileName);
+            request.setDescription("Downloading via InkeepX");
+            if (mimeType != null && !mimeType.isEmpty()) request.setMimeType(mimeType);
+            String cookies = CookieManager.getInstance().getCookie(url);
+            if (cookies != null) request.addRequestHeader("Cookie", cookies);
+            if (userAgent != null) request.addRequestHeader("User-Agent", userAgent);
+            request.setNotificationVisibility(
+                android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+            } else {
+                // Public Downloads needs the WRITE_EXTERNAL_STORAGE runtime
+                // permission on Android 6–9, which we never request — enqueue()
+                // threw a SecurityException and the download silently died.
+                request.setDestinationInExternalFilesDir(
+                    this, Environment.DIRECTORY_DOWNLOADS, fileName);
+            }
+            android.app.DownloadManager dm =
+                (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) throw new IllegalStateException("DownloadManager unavailable");
+            dm.enqueue(request);
+            Toast.makeText(this, "Downloading " + fileName + "…", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            // Non-http scheme, DownloadManager disabled, etc. — let another app try.
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception e2) {
+                Toast.makeText(this, "Download failed. Please try again.",
+                    Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     // ── Authenticated web download (keeps site session/cookies) ──────────────
     private void handleAuthenticatedWebDownload(String url) {
-        String safeUrl = url.replace("'", "\\'");
         String js =
             "(function() {" +
-            "  fetch('" + safeUrl + "', { credentials: 'include' })" +
+            "  var url = " + JSONObject.quote(url) + ";" +
+            "  var name = '';" +
+            "  fetch(url, { credentials: 'include' })" +
             "    .then(function(r) {" +
             "      if (!r.ok) throw new Error('HTTP ' + r.status);" +
+            "      var cd = r.headers.get('Content-Disposition') || '';" +
+            "      var m = /filename\\*?=(?:UTF-8'')?\"?([^\";]+)\"?/i.exec(cd);" +
+            "      if (m) { try { name = decodeURIComponent(m[1]); } catch (e) { name = m[1]; } }" +
             "      return r.blob();" +
             "    })" +
             "    .then(function(blob) {" +
             "      var reader = new FileReader();" +
             "      reader.onloadend = function() {" +
-            "        var b64 = reader.result.split(',')[1];" +
-            "        AndroidDownload.receiveBase64(b64, blob.type || 'text/csv');" +
+            "        var s = String(reader.result || ''); var i = s.indexOf(',');" +
+            "        AndroidDownload.receiveFile(i >= 0 ? s.substring(i + 1) : '', blob.type || 'text/csv', name);" +
             "      };" +
+            "      reader.onerror = function() { AndroidDownload.receiveBase64('', 'text/error'); };" +
             "      reader.readAsDataURL(blob);" +
             "    })" +
             "    .catch(function() {" +
@@ -757,11 +892,26 @@ public class MainActivity extends Activity {
     private class DownloadBridge {
         @android.webkit.JavascriptInterface
         public void receiveBase64(String base64, String mimeType) {
-            runOnUiThread(() -> saveBase64File(base64, mimeType));
+            runOnUiThread(() -> saveBase64File(base64, mimeType, null));
+        }
+
+        // Same as above but keeps the real file name (e.g. "invoice-1042.pdf")
+        // instead of a generic inkeepx_export_<timestamp> name.
+        @android.webkit.JavascriptInterface
+        public void receiveFile(String base64, String mimeType, String fileName) {
+            runOnUiThread(() -> saveBase64File(base64, mimeType, fileName));
         }
     }
 
-    private void saveBase64File(String base64, String mimeType) {
+    // Strip path separators and anything else a file name must not contain.
+    private static String sanitizeFileName(String name) {
+        if (name == null) return "";
+        String s = name.trim().replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
+        if (s.length() > 120) s = s.substring(0, 120);
+        return s;
+    }
+
+    private void saveBase64File(String base64, String mimeType, String requestedName) {
         try {
             if (base64 == null || base64.isEmpty()) {
                 Toast.makeText(this, "Download failed. Please try again.",
@@ -769,9 +919,18 @@ public class MainActivity extends Activity {
                 return;
             }
             if (mimeType == null || mimeType.trim().isEmpty()) mimeType = "application/octet-stream";
+            // "text/csv; charset=utf-8" → "text/csv"
+            mimeType = mimeType.split(";")[0].trim().toLowerCase();
             String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType);
-            if (ext == null) ext = mimeType.contains("csv") ? "csv" : "bin";
-            String fileName = "inkeepx_export_" + System.currentTimeMillis() + "." + ext;
+            if (ext == null) ext = mimeType.contains("csv") ? "csv"
+                : mimeType.contains("pdf") ? "pdf" : "bin";
+
+            String fileName = sanitizeFileName(requestedName);
+            if (fileName.isEmpty()) {
+                fileName = "inkeepx_export_" + System.currentTimeMillis() + "." + ext;
+            } else if (!fileName.contains(".")) {
+                fileName = fileName + "." + ext;
+            }
             byte[] data = Base64.decode(base64, Base64.DEFAULT);
 
             Uri fileUri;
@@ -782,13 +941,14 @@ public class MainActivity extends Activity {
             }
 
             openDownloadedFile(fileUri, mimeType);
-            Toast.makeText(this, "Saved to Downloads: " + fileName, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Saved: " + fileName, Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, "Download failed: " + e.getMessage(),
                 Toast.LENGTH_LONG).show();
         }
     }
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private Uri saveToPublicDownloads(String fileName, String mimeType, byte[] data)
             throws Exception {
         ContentValues values = new ContentValues();
@@ -832,9 +992,227 @@ public class MainActivity extends Activity {
             Intent share = new Intent(Intent.ACTION_SEND);
             share.setType(mimeType);
             share.putExtra(Intent.EXTRA_STREAM, fileUri);
+            share.setClipData(ClipData.newRawUri("", fileUri));
             share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(share, "Open with"));
+            try {
+                startActivity(Intent.createChooser(share, "Open with"));
+            } catch (Exception ignored) {}
         }
+    }
+
+    // ── Share bridge (navigator.share polyfill → Android share sheet) ────────
+    //
+    // Android WebView has no Web Share API. The site's invoice / purchase
+    // order / delivery note pages show a "Share" button only when
+    // navigator.share + navigator.canShare({files}) exist, so on Android
+    // the button never appeared. The bootstrap script below defines both;
+    // files arrive here as base64, get written to the cache dir and are
+    // handed to ACTION_SEND through the FileProvider.
+    private class ShareBridge {
+        @android.webkit.JavascriptInterface
+        public void share(String requestId, String title, String text, String url,
+                          String filesJson) {
+            runOnUiThread(() -> performShare(requestId, title, text, url, filesJson));
+        }
+    }
+
+    private void performShare(String requestId, String title, String text, String url,
+                              String filesJson) {
+        try {
+            File shareDir = new File(getCacheDir(), "share");
+            if (!shareDir.exists() && !shareDir.mkdirs()) {
+                throw new IllegalStateException("Cannot create share folder");
+            }
+            cleanOldShareFiles(shareDir);
+
+            ArrayList<Uri> uris = new ArrayList<>();
+            String mime = null;
+            JSONArray files = filesJson == null || filesJson.isEmpty()
+                ? new JSONArray() : new JSONArray(filesJson);
+            for (int i = 0; i < files.length(); i++) {
+                JSONObject f = files.getJSONObject(i);
+                String b64  = f.optString("b64", "");
+                String type = f.optString("type", "").split(";")[0].trim().toLowerCase();
+                if (type.isEmpty()) type = "application/octet-stream";
+                String name = sanitizeFileName(f.optString("name", ""));
+                if (name.isEmpty()) {
+                    String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(type);
+                    name = "inkeepx_" + System.currentTimeMillis() + "_" + i
+                        + "." + (ext == null ? "bin" : ext);
+                }
+                byte[] data = Base64.decode(b64, Base64.DEFAULT);
+                if (data.length == 0) throw new IllegalStateException("Empty file");
+
+                File out = new File(shareDir, name);
+                try (FileOutputStream fos = new FileOutputStream(out)) {
+                    fos.write(data);
+                    fos.flush();
+                }
+                uris.add(FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", out));
+                // One shared type if all files agree, otherwise a wildcard.
+                if (mime == null) mime = type;
+                else if (!mime.equals(type)) mime = "*/*";
+            }
+
+            String body = (text == null ? "" : text);
+            if (url != null && !url.isEmpty()) body = body.isEmpty() ? url : body + "\n" + url;
+
+            Intent send;
+            if (uris.isEmpty()) {
+                if (body.isEmpty() && (title == null || title.isEmpty())) {
+                    throw new IllegalArgumentException("Nothing to share");
+                }
+                send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/plain");
+                send.putExtra(Intent.EXTRA_TEXT, body.isEmpty() ? title : body);
+            } else if (uris.size() == 1) {
+                send = new Intent(Intent.ACTION_SEND);
+                send.setType(mime);
+                send.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+                if (!body.isEmpty()) send.putExtra(Intent.EXTRA_TEXT, body);
+                send.setClipData(ClipData.newRawUri("", uris.get(0)));
+            } else {
+                send = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                send.setType(mime);
+                send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+                if (!body.isEmpty()) send.putExtra(Intent.EXTRA_TEXT, body);
+                ClipData clip = ClipData.newRawUri("", uris.get(0));
+                for (int i = 1; i < uris.size(); i++) clip.addItem(new ClipData.Item(uris.get(i)));
+                send.setClipData(clip);
+            }
+            if (title != null && !title.isEmpty()) send.putExtra(Intent.EXTRA_SUBJECT, title);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            Intent chooser = Intent.createChooser(send,
+                title == null || title.isEmpty() ? "Share" : title);
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(chooser);
+            notifyShareResult(requestId, true, null);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "No app available to share with.", Toast.LENGTH_SHORT).show();
+            notifyShareResult(requestId, false, "NotAllowedError");
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not share: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            notifyShareResult(requestId, false, "DataError");
+        }
+    }
+
+    // Shared files sit in cache; drop anything older than a day.
+    private void cleanOldShareFiles(File dir) {
+        File[] old = dir.listFiles();
+        if (old == null) return;
+        long cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000;
+        for (File f : old) {
+            if (f.lastModified() < cutoff) {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        }
+    }
+
+    private void notifyShareResult(String requestId, boolean ok, String errorName) {
+        String js = "window.__inkeepxShareResult && window.__inkeepxShareResult("
+            + JSONObject.quote(requestId == null ? "" : requestId) + ","
+            + (ok ? "true" : "false") + ","
+            + JSONObject.quote(errorName == null ? "" : errorName) + ");";
+        webView.evaluateJavascript(js, null);
+    }
+
+    // Register the bootstrap so it runs before any page script — this is what
+    // makes the site's own navigator.share probe succeed. Only our own origin
+    // gets the polyfill (and therefore access to the share bridge).
+    private void installDocumentStartScript() {
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(webView, buildBootstrapScript(),
+                    new HashSet<>(Arrays.asList(
+                        "https://" + SITE_DOMAIN,
+                        "https://*." + SITE_DOMAIN)));
+                documentStartScriptInstalled = true;
+            }
+        } catch (Exception e) {
+            documentStartScriptInstalled = false; // fall back to onPageStarted injection
+        }
+    }
+
+    // Idempotent: defines navigator.share / navigator.canShare backed by the
+    // native share sheet, and routes window.print() to Android's PrintManager.
+    private String buildBootstrapScript() {
+        return
+            "(function() {" +
+            "  if (window.__inkeepxBootstrapped) return;" +
+            "  window.__inkeepxBootstrapped = true;" +
+            "" +
+            "  if (window.AndroidPrint) {" +
+            "    window.print = function() { AndroidPrint.print(); };" +
+            "  }" +
+            "" +
+            "  if (!window.AndroidShare) return;" +
+            "  var pending = {};" +
+            "  var seq = 0;" +
+            "" +
+            "  function isBlob(f) { return typeof Blob !== 'undefined' && f instanceof Blob; }" +
+            "" +
+            "  function readB64(f) {" +
+            "    return new Promise(function(resolve, reject) {" +
+            "      var fr = new FileReader();" +
+            "      fr.onloadend = function() {" +
+            "        var s = String(fr.result || ''); var i = s.indexOf(',');" +
+            "        resolve(i >= 0 ? s.substring(i + 1) : '');" +
+            "      };" +
+            "      fr.onerror = function() { reject(fr.error || new Error('read failed')); };" +
+            "      fr.readAsDataURL(f);" +
+            "    });" +
+            "  }" +
+            "" +
+            "  function makeError(name, msg) {" +
+            "    var e = new Error(msg); e.name = name; return e;" +
+            "  }" +
+            "" +
+            "  navigator.canShare = function(data) {" +
+            "    if (!data || typeof data !== 'object') return false;" +
+            "    if (data.files && data.files.length) {" +
+            "      for (var i = 0; i < data.files.length; i++) {" +
+            "        if (!isBlob(data.files[i])) return false;" +
+            "      }" +
+            "      return true;" +
+            "    }" +
+            "    return !!(data.url || data.text || data.title);" +
+            "  };" +
+            "" +
+            "  navigator.share = function(data) {" +
+            "    if (!navigator.canShare(data)) {" +
+            "      return Promise.reject(makeError('TypeError', 'Invalid share data'));" +
+            "    }" +
+            "    var id = String(++seq);" +
+            "    var files = data.files ? Array.prototype.slice.call(data.files) : [];" +
+            "    var reads = files.map(function(f) {" +
+            "      return readB64(f).then(function(b64) {" +
+            "        return { name: f.name || '', type: f.type || '', b64: b64 };" +
+            "      });" +
+            "    });" +
+            "    return Promise.all(reads).then(function(list) {" +
+            "      return new Promise(function(resolve, reject) {" +
+            "        pending[id] = { resolve: resolve, reject: reject };" +
+            "        try {" +
+            "          AndroidShare.share(id, String(data.title || ''), String(data.text || '')," +
+            "            String(data.url || ''), JSON.stringify(list));" +
+            "        } catch (e) {" +
+            "          delete pending[id];" +
+            "          reject(makeError('NotAllowedError', 'Share bridge failed'));" +
+            "        }" +
+            "      });" +
+            "    });" +
+            "  };" +
+            "" +
+            "  window.__inkeepxShareResult = function(id, ok, errName) {" +
+            "    var p = pending[id]; if (!p) return;" +
+            "    delete pending[id];" +
+            "    if (ok) p.resolve();" +
+            "    else p.reject(makeError(errName || 'NotAllowedError', 'Share failed'));" +
+            "  };" +
+            "})();";
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -920,10 +1298,12 @@ public class MainActivity extends Activity {
     // Server-side failure (404, 500, …): same screen, different words,
     // plus a Go Back button so the user is never stuck.
     private void showError(int status) {
-        offlineIcon.setText("⚠️");
-        offlineTitle.setText("Something Went Wrong");
+        offlineIcon.setText(status == 403 ? "🔒" : "⚠️");
+        offlineTitle.setText(status == 403 ? "Access Denied" : "Something Went Wrong");
         String hint = status == 404
             ? "That page could not be found."
+            : status == 403
+            ? "Your account doesn't have permission to view this page."
             : "The server had a problem loading this page.";
         offlineSubtitle.setText(hint + "\n(Error " + status + ")");
         goBackButton.setVisibility(View.VISIBLE);
@@ -955,6 +1335,7 @@ public class MainActivity extends Activity {
         sensorManager.registerListener(shakeDetector,
             sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
             SensorManager.SENSOR_DELAY_UI);
+        registerNetworkCallback();
     }
 
     @Override
@@ -962,7 +1343,62 @@ public class MainActivity extends Activity {
         super.onPause();
         webView.onPause();
         sensorManager.unregisterListener(shakeDetector);
+        unregisterNetworkCallback();
         CookieManager.getInstance().flush();
+    }
+
+    // When connectivity comes back while the offline/error screen is up,
+    // reload automatically — the user doesn't even need to tap Try Again.
+    private void registerNetworkCallback() {
+        ConnectivityManager cm =
+            (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                // Short delay: the network is announced slightly before
+                // DNS/routes are actually usable.
+                slowLoadHandler.postDelayed(() -> {
+                    if (offlineView.getVisibility() == View.VISIBLE && isOnline()) {
+                        showWeb();
+                        prepareForLoad();
+                        webView.reload();
+                    }
+                }, 800);
+            }
+        };
+        try {
+            cm.registerNetworkCallback(
+                new NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build(),
+                networkCallback);
+        } catch (Exception e) {
+            networkCallback = null; // auto-reload degrades; Try Again still works
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (networkCallback == null) return;
+        ConnectivityManager cm =
+            (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        try {
+            cm.unregisterNetworkCallback(networkCallback);
+        } catch (Exception ignored) {}
+        networkCallback = null;
+    }
+
+    @Override
+    protected void onDestroy() {
+        slowLoadHandler.removeCallbacksAndMessages(null);
+        if (fileChooserCallback != null) {
+            fileChooserCallback.onReceiveValue(null);
+            fileChooserCallback = null;
+        }
+        if (webView != null) {
+            webView.stopLoading();
+            webView.destroy();
+        }
+        super.onDestroy();
     }
 
     @Override

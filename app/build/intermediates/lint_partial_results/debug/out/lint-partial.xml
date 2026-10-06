@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.2.0" type="partial_results">
+    <map id="UnsafeIntentLaunch">
+            <map id="unprotected">
+                <entry
+                    name="com.inkeepx.app.MainActivity"
+                    boolean="true"/>
+            </map>
+    </map>
+    <map id="UnsafeImplicitIntentLaunch">
+            <map id="actionsSent">
+                    <map id="android.settings.APPLICATION_DETAILS_SETTINGS (used to start an activity)">
+                        <location id="0"
+                            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/inkeepx/app/MainActivity.java"
+                            line="576"
+                            column="29"
+                            startOffset="26672"
+                            endLine="576"
+                            endColumn="85"
+                            endOffset="26728"/>
+                    </map>
+                    <map id="android.intent.action.VIEW (used to start an activity)">
+                        <location id="0"
+                            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/inkeepx/app/MainActivity.java"
+                            line="616"
+                            column="27"
+                            startOffset="28366"
+                            endLine="616"
+                            endColumn="73"
+                            endOffset="28412"/>
+                        <location id="1"
+                            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/inkeepx/app/MainActivity.java"
+                            line="839"
+                            column="31"
+                            startOffset="39638"
+                            endLine="839"
+                            endColumn="77"
+                            endOffset="39684"/>
+                        <location id="2"
+                            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/inkeepx/app/MainActivity.java"
+                            line="985"
+                            column="25"
+                            startOffset="46270"
+                            endLine="985"
+                            endColumn="55"
+                            endOffset="46300"/>
+                    </map>
+            </map>
+    </map>
+    <map id="UnusedResources">
+        <entry
+            name="model"
+            string="drawable[offline_logo_bg(U),offline_retry_btn(U)],id[offlineView(U),splashView(U),retryButton(U),offlineTitle(U),swipeRefresh(U),greetingText(U),webView(U),offlineSubtitle(U),goBackButton(U),offlineIcon(U),statusBanner(U),spinner(U)],layout[activity_main(U)],mipmap[ic_launcher_round(U),ic_launcher(U)],string[app_name(U)],style[AppTheme(U)],xml[file_paths(U)];e^0^1;;;"/>
+    </map>
+
+</incidents>

@@ -1,0 +1,58 @@
+[
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-xhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-hdpi_ic_launcher_round.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-hdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-xxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/layout_activity_main.xml.flat",
+        "source": "com.inkeepx.app-main-11:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-mdpi_ic_launcher_round.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-mdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/xml_file_paths.xml.flat",
+        "source": "com.inkeepx.app-main-11:/xml/file_paths.xml"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-xxxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/mipmap-xxhdpi_ic_launcher_round.png.flat",
+        "source": "com.inkeepx.app-main-11:/mipmap-xxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/drawable_offline_retry_btn.xml.flat",
+        "source": "com.inkeepx.app-main-11:/drawable/offline_retry_btn.xml"
+    },
+    {
+        "merged": "com.inkeepx.app-merged_res-9:/drawable_offline_logo_bg.xml.flat",
+        "source": "com.inkeepx.app-main-11:/drawable/offline_logo_bg.xml"
+    }
+]

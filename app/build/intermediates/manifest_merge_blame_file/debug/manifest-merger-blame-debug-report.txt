@@ -1,0 +1,129 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.inkeepx.app"
+4    android:versionCode="3"
+5    android:versionName="1.2" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="21"
+9        android:targetSdkVersion="34" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:4:5-67
+11-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:4:22-64
+12    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+12-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:5:5-79
+12-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:5:22-76
+13    <uses-permission android:name="android.permission.CAMERA" />
+13-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:6:5-65
+13-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:6:22-62
+14    <!--
+15         Camera is optional (barcode scanning / photo upload). Without this the
+16         Play Store hides the app from tablets and Chromebooks with no camera.
+17    -->
+18    <uses-feature
+18-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:9:5-85
+19        android:name="android.hardware.camera"
+19-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:9:19-57
+20        android:required="false" />
+20-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:9:58-82
+21
+22    <uses-permission
+22-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:10:5-11:38
+23        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+23-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:10:22-78
+24        android:maxSdkVersion="28" />
+24-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:11:9-35
+25    <uses-permission
+25-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:12:5-13:38
+26        android:name="android.permission.READ_EXTERNAL_STORAGE"
+26-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:12:22-77
+27        android:maxSdkVersion="32" />
+27-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:13:9-35
+28
+29    <!--
+30         Android 11+ package visibility: without this, querying for camera
+31         apps (to grant them write access to our photo file) returns nothing.
+32    -->
+33    <queries>
+33-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:17:5-21:15
+34        <intent>
+34-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:18:9-20:18
+35            <action android:name="android.media.action.IMAGE_CAPTURE" />
+35-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:19:13-73
+35-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:19:21-70
+36        </intent>
+37    </queries>
+38
+39    <permission
+39-->[androidx.core:core:1.12.0] C:\Users\USER\.gradle\caches\transforms-3\d85085ceaf3fe218053092093934f6af\transformed\core-1.12.0\AndroidManifest.xml:22:5-24:47
+40        android:name="com.inkeepx.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+40-->[androidx.core:core:1.12.0] C:\Users\USER\.gradle\caches\transforms-3\d85085ceaf3fe218053092093934f6af\transformed\core-1.12.0\AndroidManifest.xml:23:9-81
+41        android:protectionLevel="signature" />
+41-->[androidx.core:core:1.12.0] C:\Users\USER\.gradle\caches\transforms-3\d85085ceaf3fe218053092093934f6af\transformed\core-1.12.0\AndroidManifest.xml:24:9-44
+42
+43    <uses-permission android:name="com.inkeepx.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+43-->[androidx.core:core:1.12.0] C:\Users\USER\.gradle\caches\transforms-3\d85085ceaf3fe218053092093934f6af\transformed\core-1.12.0\AndroidManifest.xml:26:5-97
+43-->[androidx.core:core:1.12.0] C:\Users\USER\.gradle\caches\transforms-3\d85085ceaf3fe218053092093934f6af\transformed\core-1.12.0\AndroidManifest.xml:26:22-94
+44
+45    <application
+45-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:23:5-53:19
+46        android:allowBackup="true"
+46-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:24:9-35
+47        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+47-->[androidx.core:core:1.12.0] C:\Users\USER\.gradle\caches\transforms-3\d85085ceaf3fe218053092093934f6af\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
+48        android:debuggable="true"
+49        android:extractNativeLibs="true"
+50        android:hardwareAccelerated="true"
+50-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:29:9-43
+51        android:icon="@mipmap/ic_launcher"
+51-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:25:9-43
+52        android:label="@string/app_name"
+52-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:27:9-41
+53        android:roundIcon="@mipmap/ic_launcher_round"
+53-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:26:9-54
+54        android:theme="@style/AppTheme"
+54-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:28:9-40
+55        android:usesCleartextTraffic="false" >
+55-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:30:9-45
+56        <activity
+56-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:32:9-41:20
+57            android:name="com.inkeepx.app.MainActivity"
+57-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:33:13-41
+58            android:configChanges="orientation|screenSize|keyboardHidden"
+58-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:34:13-74
+59            android:exported="true"
+59-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:36:13-36
+60            android:windowSoftInputMode="adjustResize" >
+60-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:35:13-55
+61            <intent-filter>
+61-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:37:13-40:29
+62                <action android:name="android.intent.action.MAIN" />
+62-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:38:17-69
+62-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:38:25-66
+63
+64                <category android:name="android.intent.category.LAUNCHER" />
+64-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:39:17-77
+64-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:39:27-74
+65            </intent-filter>
+66        </activity>
+67
+68        <provider
+69            android:name="androidx.core.content.FileProvider"
+69-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:44:13-62
+70            android:authorities="com.inkeepx.app.fileprovider"
+70-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:45:13-64
+71            android:exported="false"
+71-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:46:13-37
+72            android:grantUriPermissions="true" >
+72-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:47:13-47
+73            <meta-data
+73-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:48:13-50:54
+74                android:name="android.support.FILE_PROVIDER_PATHS"
+74-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:49:17-67
+75                android:resource="@xml/file_paths" />
+75-->C:\Users\USER\Desktop\Projects\inkeepx-app\app\src\main\AndroidManifest.xml:50:17-51
+76        </provider>
+77    </application>
+78
+79</manifest>

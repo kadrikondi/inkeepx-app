@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/swipeRefresh"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000">
+
+        <WebView
+            android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Slim status banner: "offline — showing saved page" / "slow connection" -->
+        <TextView
+            android:id="@+id/statusBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:background="#E6333333"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:visibility="gone" />
+
+        <!-- Centered spinner shown during page load -->
+        <ProgressBar
+            android:id="@+id/spinner"
+            style="@android:style/Widget.Material.ProgressBar"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_centerInParent="true"
+            android:indeterminateTint="#E8000D"
+            android:visibility="visible" />
+
+        <!-- Offline page -->
+        <LinearLayout
+            android:id="@+id/offlineView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="40dp"
+            android:background="#000000"
+            android:visibility="gone">
+
+            <!-- Logo mark: red rounded square with X -->
+            <FrameLayout
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                android:layout_marginBottom="28dp">
+
+                <View
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:background="@drawable/offline_logo_bg" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="inkeepX"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black" />
+            </FrameLayout>
+
+            <!-- Brand name -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="InkeepX"
+                android:textColor="#FFFFFF"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-black"
+                android:letterSpacing="0.05"
+                android:layout_marginBottom="32dp" />
+
+            <!-- Icon area: 📡 when offline, ⚠️ on server errors -->
+            <TextView
+                android:id="@+id/offlineIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📡"
+                android:textSize="52sp"
+                android:layout_marginBottom="24dp" />
+
+            <!-- Headline -->
+            <TextView
+                android:id="@+id/offlineTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="You're Offline"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:layout_marginBottom="12dp" />
+
+            <!-- Subtitle -->
+            <TextView
+                android:id="@+id/offlineSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Connect to Wi-Fi or mobile data\nto continue using InkeepX."
+                android:textColor="#999999"
+                android:textSize="15sp"
+                android:gravity="center"
+                android:lineSpacingMultiplier="1.4"
+                android:layout_marginBottom="44dp" />
+
+            <!-- Retry button -->
+            <Button
+                android:id="@+id/retryButton"
+                android:layout_width="220dp"
+                android:layout_height="52dp"
+                android:text="Try Again"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04"
+                android:background="@drawable/offline_retry_btn"
+                android:stateListAnimator="@null" />
+
+            <!-- Go Back button — shown only for server errors (404/500) -->
+            <Button
+                android:id="@+id/goBackButton"
+                android:layout_width="220dp"
+                android:layout_height="52dp"
+                android:layout_marginTop="14dp"
+                android:text="Go Back"
+                android:textColor="#BBBBBB"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04"
+                android:background="@android:color/transparent"
+                android:stateListAnimator="@null"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Splash / greeting screen shown while the first page loads -->
+        <LinearLayout
+            android:id="@+id/splashView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="40dp"
+            android:background="#000000"
+            android:visibility="visible">
+
+            <!-- Logo mark: red rounded square with X -->
+            <FrameLayout
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                android:layout_marginBottom="32dp">
+
+                <View
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:background="@drawable/offline_logo_bg" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="inkeepX"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black" />
+            </FrameLayout>
+
+            <!-- Time-based greeting, set at runtime -->
+            <TextView
+                android:id="@+id/greetingText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Good Morning"
+                android:textColor="#FFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Welcome to InkeepX"
+                android:textColor="#E8000D"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Modern Inventory &amp; POS Solutions"
+                android:textColor="#999999"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:layout_marginBottom="40dp" />
+
+            <ProgressBar
+                style="@android:style/Widget.Material.ProgressBar"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:indeterminateTint="#E8000D" />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+
+</androidx.swiperefreshlayout.widget.SwipeRefreshLayout>

@@ -1,0 +1,22 @@
+R_DEF: Internal format may change without notice
+local
+drawable offline_logo_bg
+drawable offline_retry_btn
+id goBackButton
+id greetingText
+id offlineIcon
+id offlineSubtitle
+id offlineTitle
+id offlineView
+id retryButton
+id spinner
+id splashView
+id statusBanner
+id swipeRefresh
+id webView
+layout activity_main
+mipmap ic_launcher
+mipmap ic_launcher_round
+string app_name
+style AppTheme
+xml file_paths
