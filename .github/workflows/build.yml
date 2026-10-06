@@ -27,8 +27,17 @@ jobs:
           unzip -q /tmp/gradle.zip -d /opt/gradle
           echo "/opt/gradle/gradle-8.4/bin" >> $GITHUB_PATH
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # The ubuntu runner ships with the Android SDK at $ANDROID_HOME.
+      # (android-actions/setup-android@v3 was removed: it runs
+      # "sdkmanager tools", a package Google has deleted, and fails.)
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -n1)"
+          fi
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Build Debug APK
         run: gradle assembleDebug
